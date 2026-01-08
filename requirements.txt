@@ -1,4 +1,5 @@
 google-generativeai
 python-wordpress-xmlrpc
 requests
-google-auth
+oauth2client
+httplib2
