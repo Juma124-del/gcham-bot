@@ -17,12 +17,12 @@ WP_USER = os.getenv("WP_USER")
 WP_PASS = os.getenv("WP_PASS")
 INDEXING_JSON = os.getenv("INDEXING_SERVICE_ACCOUNT")
 
-genai.configure(api_key=GOOGLE_API_KEY)
+# FORCE STABLE API VERSION
+genai.configure(api_key=GOOGLE_API_KEY, transport='rest')
 
-# SWITCHED TO 1.5 FLASH TO BYPASS BILLING ERRORS
+# USE THE STABLE MODEL ALIAS
 ai_model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
-    system_instruction="You are a veteran USA Investigative Journalist. Your tone is sharp and uses American English."
+    model_name='gemini-1.5-flash'
 )
 
 wp_client = Client(WP_URL, WP_USER, WP_PASS)
@@ -45,35 +45,32 @@ def get_trending_usa_topic():
     categories = ["US Finance", "US Sports", "USA Entertainment", "USA Politics", "USA Health"]
     niche = random.choice(categories)
     prompt = f"Identify the #1 trending news story in the USA right now for {niche}. Headline only."
-    # Added a try/except here to handle quota issues gracefully
     try:
-        topic = ai_model.generate_content(prompt).text.strip()
-        return topic, niche
+        # Explicitly using the stable model call
+        response = ai_model.generate_content(prompt)
+        return response.text.strip(), niche
     except Exception as e:
-        print(f"Quota error: {e}")
+        print(f"❌ AI Error: {e}")
         return None, None
 
 def generate_super_article(topic, niche):
     base_url = WP_URL.replace('/xmlrpc.php', '')
-    prompt = f"""Write a 1000-word investigative SEO report on: '{topic}'.
-    - Use <h1>, <h2>, <h3>.
-    - Start with a TL;DR box.
-    - Naturally link to <a href='{base_url}'>GCHAM USA News</a>.
-    - End with a 5-question FAQ.
-    - Style: High-energy American journalism."""
-    return ai_model.generate_content(prompt).text.replace('**', '<b>')
+    prompt = f"Write a 1000-word investigative SEO report on: '{topic}'. Use <h1>, <h2>, <h3>. Start with a TL;DR box. Naturally link to <a href='{base_url}'>GCHAM USA News</a>. High-energy American journalism."
+    response = ai_model.generate_content(prompt)
+    return response.text.replace('**', '<b>')
 
 def publish():
     topic, niche = get_trending_usa_topic()
     if not topic: return
     
-    print(f"🔍 Topic: {topic}")
+    print(f"🔍 Researching: {topic}")
     content = generate_super_article(topic, niche)
     
     title_match = re.search('<h1>(.*?)</h1>', content)
     final_title = title_match.group(1) if title_match else topic
 
-    img_url = "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80"
+    # Professional Stock Image for USA News
+    img_url = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1200&q=80"
     img_data = requests.get(img_url).content
     media_id = wp_client.call(media.UploadFile({'name': 'news.jpg', 'type': 'image/jpeg', 'bits': xmlrpc_client.Binary(img_data)}))['id']
 
