@@ -14,10 +14,10 @@ WP_URL = os.getenv("WP_URL")
 WP_USER = os.getenv("WP_USER")
 WP_PASS = os.getenv("WP_PASS")
 
-# Initialize Gemini 2.0 with professional journalism instructions
+# Initialize Gemini 1.5 with professional journalism instructions
 genai.configure(api_key=GOOGLE_API_KEY)
 ai_model = genai.GenerativeModel(
-    model_name='gemini-2.0-flash',
+    model_name='gemini-1.5-flash-8b',
     system_instruction="You are a senior USA investigative journalist. Write in a professional, engaging tone for a North American audience. Focus on SEO-rich headlines and structured content."
 )
 
