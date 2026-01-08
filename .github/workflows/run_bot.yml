@@ -1,0 +1,29 @@
+name: GCHAM Auto-Post Engine
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'  # Runs every 3 hours
+  workflow_dispatch:      # This creates the "Run workflow" button
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Tools
+        run: pip install -r requirements.txt
+
+      - name: Run GCHAM Bot
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WP_URL: ${{ secrets.WP_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASS: ${{ secrets.WP_PASS }}
+        run: python bot.py
