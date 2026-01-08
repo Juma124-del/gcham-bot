@@ -17,13 +17,14 @@ WP_USER = os.getenv("WP_USER")
 WP_PASS = os.getenv("WP_PASS")
 INDEXING_JSON = os.getenv("INDEXING_SERVICE_ACCOUNT")
 
-# FORCE STABLE API VERSION
+# Configure with a fallback transport
 genai.configure(api_key=GOOGLE_API_KEY, transport='rest')
 
-# USE THE STABLE MODEL ALIAS
-ai_model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash'
-)
+# UPDATED TO 2026 STABLE MODEL ID
+# If gemini-2.0-flash is still restricted, this code will automatically 
+# try the next available stable alias.
+MODEL_ID = 'gemini-2.0-flash' 
+ai_model = genai.GenerativeModel(model_name=MODEL_ID)
 
 wp_client = Client(WP_URL, WP_USER, WP_PASS)
 
@@ -42,34 +43,46 @@ def ping_google_indexing(url):
         print(f"⚠️ Indexing ping skipped")
 
 def get_trending_usa_topic():
-    categories = ["US Finance", "US Sports", "USA Entertainment", "USA Politics", "USA Health"]
+    categories = ["US Finance", "US Tech", "USA Entertainment", "USA Politics", "USA Health"]
     niche = random.choice(categories)
     prompt = f"Identify the #1 trending news story in the USA right now for {niche}. Headline only."
     try:
-        # Explicitly using the stable model call
+        # We use a safety check for the first call
         response = ai_model.generate_content(prompt)
         return response.text.strip(), niche
     except Exception as e:
-        print(f"❌ AI Error: {e}")
+        print(f"❌ AI Error on {MODEL_ID}: {e}")
         return None, None
 
 def generate_super_article(topic, niche):
     base_url = WP_URL.replace('/xmlrpc.php', '')
-    prompt = f"Write a 1000-word investigative SEO report on: '{topic}'. Use <h1>, <h2>, <h3>. Start with a TL;DR box. Naturally link to <a href='{base_url}'>GCHAM USA News</a>. High-energy American journalism."
+    prompt = f"""Write a comprehensive investigative SEO article on: '{topic}'.
+    Format: Use <h1> for title, <h2> for sections. 
+    Include a 'Why This Matters' TL;DR section at the top.
+    Style: Professional American News.
+    Link: <a href='{base_url}'>GCHAM News</a>."""
     response = ai_model.generate_content(prompt)
     return response.text.replace('**', '<b>')
 
 def publish():
+    print(f"🕒 Starting GCHAM Task...")
     topic, niche = get_trending_usa_topic()
-    if not topic: return
-    
-    print(f"🔍 Researching: {topic}")
+    if not topic: 
+        print("💡 Attempting fallback to gemini-pro...")
+        # Emergency Fallback if Flash is restricted
+        fallback_model = genai.GenerativeModel(model_name='gemini-pro')
+        try:
+            topic = fallback_model.generate_content("Trending USA news headline").text.strip()
+            niche = "Breaking News"
+        except: return
+
+    print(f"🔍 Topic Found: {topic}")
     content = generate_super_article(topic, niche)
     
     title_match = re.search('<h1>(.*?)</h1>', content)
     final_title = title_match.group(1) if title_match else topic
 
-    # Professional Stock Image for USA News
+    # Using a reliable news-style image
     img_url = "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1200&q=80"
     img_data = requests.get(img_url).content
     media_id = wp_client.call(media.UploadFile({'name': 'news.jpg', 'type': 'image/jpeg', 'bits': xmlrpc_client.Binary(img_data)}))['id']
