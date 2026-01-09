@@ -1,10 +1,21 @@
 import os, json, re, random, logging, feedparser, requests, io
 from PIL import Image
+
+# --- DEFENSIVE SLUGIFY IMPORT (LOCK-IN) ---
+try:
+    from python_slugify import slugify
+except ImportError:
+    logging.warning("⚠️ python-slugify not found. Activating fallback slugger.")
+    def slugify(text):
+        """Manual fallback to ensure the bot never crashes on URL generation."""
+        text = text.lower()
+        text = re.sub(r'[^a-z0-9]+', '-', text)
+        return text.strip('-')
+
 from groq import Groq
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
-from python_slugify import slugify
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 # --- CONFIG & AUTH ---
@@ -78,7 +89,6 @@ def generate_content(topic, niche, facts_text):
     try:
         res = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama-3.3-70b-versatile", response_format={"type":"json_object"})
         data = json.loads(re.sub(r'```json|```', '', res.choices[0].message.content).strip())
-        # Basic HTML Sanitization
         data['content_html'] = re.sub(r'<(script|style).*?>.*?</\1>', '', data['content_html'], flags=re.DOTALL)
         return data
     except: return None
@@ -88,13 +98,11 @@ def publish():
     logging.info("🚀 GCHAM Global News Engine: ACTIVE")
     chief_editor = "Brayan Juma"
     
-    # Selection of Pillars
     niche = random.choice(["US Economy", "Tech News", "USA Politics", "Entertainment", "Sports", "Educational"])
     
     topic_res = client.chat.completions.create(messages=[{"role":"user","content":f"One trending USA headline for {niche}. Title only."}], model="llama-3.3-70b-versatile")
     topic = topic_res.choices[0].message.content.strip().replace('"', '')
 
-    # Step 1: Research & Gating
     entries = research_topic(topic)
     if not editorial_governor(len(entries), niche, topic):
         logging.warning("Gated: Topic did not meet confidence threshold.")
@@ -102,22 +110,18 @@ def publish():
 
     facts_text = "\n".join([f"- {e.title} ({e.source.get('title')})" for e in entries[:8]])
     
-    # Step 2: Content Generation
     data = generate_content(topic, niche, facts_text)
     if not data: return
 
-    # Step 3: WordPress Construction
     post = WordPressPost()
     post.title = data['headline']
     
-    # Human Authority Byline
     byline = f'<div style="border-bottom:2px solid #333;margin-bottom:20px;"><strong>Chief Editor:</strong> {chief_editor}</div>'
     post.content = byline + data['content_html']
     post.excerpt = data['excerpt']
     post.post_status = 'publish'
     post.terms_names = {'category': [niche], 'post_tag': ['USA News', niche, chief_editor]}
 
-    # Step 4: Media Optimization
     if PEXELS_KEY:
         try:
             img_res = requests.get(f"https://api.pexels.com/v1/search?query={data['image_keyword']}&per_page=1", headers={"Authorization": PEXELS_KEY}).json()
@@ -133,9 +137,9 @@ def publish():
                 wp_img = wp_client.call(media.UploadFile(up))
                 post.thumbnail = wp_img['id']
                 post.content = f'<figure><img src="{wp_img["url"]}"/><figcaption>Credit: {photo["photographer"]} via Pexels</figcaption></figure>' + post.content
-        except: pass
+        except Exception as e:
+            logging.error(f"Media failed: {e}")
 
-    # Step 5: Push Live
     try:
         wp_client.call(posts.NewPost(post))
         logging.info(f"✅ SUCCESS: '{post.title}' is live. Editor: {chief_editor}")
