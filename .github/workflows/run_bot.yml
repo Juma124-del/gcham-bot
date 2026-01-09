@@ -2,8 +2,8 @@ name: GCHAM Auto-Post Engine
 
 on:
   schedule:
-    - cron: '0 11,23 * * *'  # Runs at 11:00 AM and 11:00 PM (Natural Cadence)
-  workflow_dispatch:        # Manual "Run" button
+    - cron: '0 11,23 * * *'  # Morning (11am) and Evening (11pm) EAT/USA cycles
+  workflow_dispatch:        # Manual "Run" button for the Chief Editor
 
 jobs:
   build:
@@ -17,10 +17,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Tools
+      - name: Install Tools (FORCED)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install groq python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity
 
       - name: Run GCHAM Bot
         env:
