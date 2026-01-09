@@ -1,7 +1,7 @@
 groq
 python-wordpress-xmlrpc
-requests
 oauth2client
 httplib2
 requests
 python-slugify
+feedparser
