@@ -1,5 +1,3 @@
-google-generativeai
+groq
 python-wordpress-xmlrpc
 requests
-oauth2client
-httplib2
