@@ -1,142 +1,141 @@
 import os
-import random
 import json
-import requests
+import re
+import random
 import logging
 import feedparser
-import httplib2
+import requests
+import io
+import time
+from PIL import Image
 from groq import Groq
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
 from python_slugify import slugify
+from tenacity import retry, stop_after_attempt, wait_fixed # pip install tenacity
 
-# --- CONFIGURATION & LOGGING ---
+# --- CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Credentials from GitHub Secrets
-GROQ_API_KEY = os.getenv("GEMINI_API_KEY") 
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
 WP_URL = os.getenv("WP_URL")
 WP_USER = os.getenv("WP_USER")
 WP_PASS = os.getenv("WP_PASS")
 PEXELS_KEY = os.getenv("PEXELS_API_KEY")
-INDEXING_SERVICE_JSON = os.getenv("INDEXING_SERVICE_JSON") # The JSON string from Google
+INDEXING_JSON = os.getenv("INDEXING_SERVICE_JSON")
 
 client = Groq(api_key=GROQ_API_KEY)
 wp_client = Client(WP_URL, WP_USER, WP_PASS)
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 def notify_google_indexing(url):
-    """PHASE 0: Indexing - Tells Google to crawl the new post immediately."""
-    if not INDEXING_SERVICE_JSON:
-        logging.warning("Indexing JSON not found. Skipping.")
-        return
-    
+    if not INDEXING_JSON: return
     try:
-        scopes = ["https://www.googleapis.com/auth/indexing"]
-        key_data = json.loads(INDEXING_SERVICE_JSON)
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(key_data, scopes=scopes)
-        http = credentials.authorize(httplib2.Http())
-        
-        endpoint = "https://indexing.googleapis.com/v3/urlNotifications:publish"
-        content = json.dumps({"url": url, "type": "URL_UPDATED"})
-        
-        response, content = http.request(endpoint, method="POST", body=content)
-        if response.status == 200:
-            logging.info(f"🚀 Google Indexing Notified for: {url}")
-        else:
-            logging.error(f"Indexing API Error {response.status}: {content}")
+        info = json.loads(INDEXING_JSON)
+        creds = service_account.Credentials.from_service_account_info(info)
+        scoped_creds = creds.with_scopes(["https://www.googleapis.com/auth/indexing"])
+        service = build('indexing', 'v3', credentials=scoped_creds)
+        service.urlNotifications().publish(body={'url': url, 'type': 'URL_UPDATED'}).execute()
+        logging.info(f"🚀 Indexing Notified: {url}")
     except Exception as e:
-        logging.error(f"Indexing Failed: {e}")
+        logging.error(f"Indexing Retry Failed: {e}")
+        raise
 
 def research_topic(topic):
-    """PHASE 1: Research - Gets real-time facts."""
+    """Reliable RSS Fetching"""
     search_query = topic.replace(" ", "+")
     rss_url = f"https://news.google.com/rss/search?q={search_query}&hl=en-US&gl=US&ceid=US:en"
-    feed = feedparser.parse(rss_url)
-    notes = [f"Source: {e.source.get('title')} - {e.title}" for e in feed.entries[:5]]
-    return "\n".join(notes)
-
-def get_image(search_keyword):
-    """PHASE 2: Media - Pexels or Wikimedia."""
-    if PEXELS_KEY:
-        try:
-            headers = {"Authorization": PEXELS_KEY}
-            url = f"https://api.pexels.com/v1/search?query={search_keyword}&per_page=1"
-            res = requests.get(url, headers=headers, timeout=10).json()
-            if res.get('photos'):
-                return res['photos'][0]['src']['large'], res['photos'][0]['photographer']
-        except: pass
-
-    # Wikimedia Fallback
-    url = "https://commons.wikimedia.org/w/api.php"
-    params = {"action": "query", "format": "json", "generator": "search", "gsrsearch": f"File:{search_keyword}", "gsrlimit": 1, "prop": "imageinfo", "iiprop": "url|user"}
     try:
-        response = requests.get(url, params=params, timeout=10).json()
-        pages = response.get("query", {}).get("pages", {})
-        for pgid, data in pages.items():
-            info = data["imageinfo"][0]
-            return info["url"], info.get("user", "Wikimedia")
-    except: return None, None
+        response = requests.get(rss_url, timeout=10)
+        feed = feedparser.parse(response.content)
+        if not feed.entries: return "No recent news found. Use general historical context."
+        return "\n".join([f"- {e.title}" for e in feed.entries[:5]])
+    except:
+        return "Research server timed out. Using AI general knowledge."
 
-def generate_content(topic, research_data):
-    """PHASE 3: Writing - Structured JSON output."""
-    prompt = f"Write a viral news report about '{topic}'. Facts: {research_data}. Respond ONLY with a JSON object containing: 'headline', 'image_keyword', 'excerpt', and 'content_html' (use <blockquote> for lead)."
+def generate_content(topic, facts):
+    prompt = f"""
+    Act as a senior USA journalist. Write a viral, ethical news report about '{topic}'.
+    STRUCTURE: Inverted Pyramid.
+    FACTS: {facts}
+    Respond ONLY with JSON: {{"headline":"", "image_keyword":"", "excerpt":"", "content_html":""}}
+    """
     try:
         completion = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"}
         )
-        return json.loads(completion.choices[0].message.content)
+        raw = completion.choices[0].message.content
+        cleaned = re.sub(r'```json|```', '', raw).strip()
+        return json.loads(cleaned)
     except Exception as e:
-        logging.error(f"LLM Error: {e}"); return None
+        logging.error(f"LLM Error: {e}")
+        # Fallback Data to prevent crash
+        return {
+            "headline": topic,
+            "image_keyword": "news",
+            "excerpt": "Breaking news update regarding recent developments.",
+            "content_html": f"<blockquote>Breaking: {topic}</blockquote><p>Details are emerging regarding this developing story...</p>"
+        }
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
+def publish_to_wp(post):
+    return wp_client.call(posts.NewPost(post))
 
 def publish():
-    logging.info("🚀 GCHAM EXECUTION STARTED")
+    logging.info("🚀 GCHAM EXECUTION INITIATED")
+    niche = random.choice(["Tech News", "US Economy", "Entertainment", "USA Politics"])
     
-    # 1. Topic & Research
-    niche = random.choice(["US Economy", "Tech News", "USA Politics"])
-    topic_call = client.chat.completions.create(messages=[{"role": "user", "content": f"Trending news headline for {niche}. Title only."}], model="llama-3.3-70b-versatile")
-    topic = topic_call.choices[0].message.content.strip().replace('"', '')
+    # Get Topic
+    try:
+        topic_res = client.chat.completions.create(
+            messages=[{"role": "user", "content": f"One trending USA headline for {niche}. Just the title."}],
+            model="llama-3.3-70b-versatile"
+        )
+        topic = topic_res.choices[0].message.content.strip().replace('"', '')
+    except: return
+
     facts = research_topic(topic)
-    
-    # 2. Write & Media
     data = generate_content(topic, facts)
-    if not data: return
-    img_url, author = get_image(data['image_keyword'])
     
-    # 3. WordPress Setup
     post = WordPressPost()
     post.title = data['headline']
+    post.content = data['content_html']
     post.excerpt = data['excerpt']
     post.post_status = 'publish'
-    post.terms_names = {'category': [niche], 'post_tag': ['News', 'Automated']}
-    
-    final_html = data['content_html']
-    if img_url:
+    post.terms_names = {'category': [niche], 'post_tag': ['USA News', 'Viral']}
+
+    # Media Handling
+    if PEXELS_KEY:
         try:
-            img_res = requests.get(img_url, timeout=15)
-            img_data = {'name': f"{slugify(data['headline'])}.jpg", 'type': 'image/jpeg', 'bits': xmlrpc_client.Binary(img_res.content)}
-            res = wp_client.call(media.UploadFile(img_data))
-            post.thumbnail = res['id']
-            img_tag = f'<figure><img src="{res["url"]}" alt="{topic}"/><figcaption>Credit: {author}</figcaption></figure>'
-            final_html = img_tag + final_html
-        except: pass
+            img_res = requests.get(f"https://api.pexels.com/v1/search?query={data['image_keyword']}&per_page=1", 
+                                   headers={"Authorization": PEXELS_KEY}, timeout=10).json()
+            if img_res.get('photos'):
+                raw_url = img_res['photos'][0]['src']['large']
+                img_data = requests.get(raw_url, timeout=10).content
+                # Resize
+                img = Image.open(io.BytesIO(img_data))
+                img.thumbnail((1200, 800))
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85)
+                
+                up = {'name': f"{slugify(post.title)}.jpg", 'type': 'image/jpeg', 'bits': xmlrpc_client.Binary(output.getvalue())}
+                res = wp_client.call(media.UploadFile(up))
+                post.thumbnail = res['id']
+                post.content = f'<figure><img src="{res["url"]}"/></figure>' + post.content
+        except Exception as e: logging.error(f"Media Error: {e}")
 
-    post.content = final_html
-
-    # 4. Final Push
+    # Final Post
     try:
-        post_id = wp_client.call(posts.NewPost(post))
-        full_post = wp_client.call(posts.GetPost(post_id))
-        logging.info(f"✅ Live at: {full_post.link}")
-        
-        # Notify Google Indexing API
+        pid = publish_to_wp(post)
+        full_post = wp_client.call(posts.GetPost(pid))
+        logging.info(f"✅ GCHAM LIVE: {full_post.link}")
         notify_google_indexing(full_post.link)
-        
-    except Exception as e:
-        logging.error(f"Final failure: {e}")
+    except Exception as e: logging.error(f"Final failure: {e}")
 
 if __name__ == "__main__":
     publish()
