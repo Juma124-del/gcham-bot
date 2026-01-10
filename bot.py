@@ -1,131 +1,123 @@
-import os, json, re, random, logging, time
+import os, json, re, random, requests, logging, time
+from datetime import datetime
 from groq import Groq
 from wordpress_xmlrpc import Client, WordPressPost
-from wordpress_xmlrpc.methods import posts
+from wordpress_xmlrpc.methods import posts, media
+from wordpress_xmlrpc.compat import xmlrpc_client
 
-# --- 1. VERSIONING ---
-SYSTEM_VERSION = "GCHAM Production v2.2 — Jan 10, 2026 Build"
+# --- 1. SYSTEM CONFIG & CREDENTIALS ---
+SYSTEM_VERSION = "GCHAM Executive v2.7 — Final 2026 Build"
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY") 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def truncate_headline(text, limit=80):
-    if len(text) <= limit: return text
-    return text[:limit].rsplit(' ', 1)[0]
+def get_pexels_image(query):
+    """Automated Image Engine: Fetches high-res news imagery."""
+    if not PEXELS_API_KEY: return None, None
+    headers = {"Authorization": PEXELS_API_KEY}
+    url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
+    try:
+        res = requests.get(url, headers=headers, timeout=12)
+        if res.status_code == 200 and res.json()['photos']:
+            photo_url = res.json()['photos'][0]['src']['large']
+            img_res = requests.get(photo_url, timeout=12)
+            return img_res.content, "image/jpeg"
+    except Exception: return None, None
+
+def enforce_ap_style(text, is_headline=False):
+    """Elite AP Style Engine: Handles acronyms and title protection."""
+    if not text: return ""
+    PROTECTED = {"U.S.", "NFL", "AI", "GOP", "SEC", "CEO", "GDP", "NASA", "CES"}
+    if is_headline:
+        words = text.split()
+        headline = [words[0].title()]
+        for w in words[1:]:
+            clean_w = w.strip('.,!?:')
+            headline.append(w if clean_w.upper() in PROTECTED else w.lower())
+        text = ' '.join(headline)
+        # Professional Title Protection (Sentence Case rules)
+        titles = ['coach', 'sen\\.', 'rep\\.', 'gov\\.', 'dr\\.', 'president', 'justice']
+        for t in titles: text = re.sub(f'\\b{t}\\b', t, text, flags=re.I)
+        return text.replace('"', "'")
+    return re.sub(r'\s+', ' ', text).strip()
 
 def publish():
-    # FAIL-FAST CHECK
-    if not all([os.getenv("GROQ_API_KEY"), os.getenv("WP_URL")]):
-        logging.error("❌ Missing critical Environment Variables.")
-        return
-
-    logging.info(f"🚀 {SYSTEM_VERSION}: BUILDING SUBSTANTIAL CONTENT")
-    
-    # --- 2. THE 2026 ANCHOR (Hard-coded Accuracy) ---
-    CURRENT_YEAR = "2026"
+    # --- 2. THE 2026 CONTEXT SHIELD ---
+    CURRENT_DATE = "Jan. 10, 2026"
     CONGRESS = "119th Congress"
-    ELECTION_CYCLE = "2026 Midterm Elections"
-
-    EDITORIAL_CONTEXT = {
-        "sports": {"season": "2025–26 NFL postseason", "week": "Wild Card Round"},
-        "politics": {"focus": f"{CONGRESS} second session and {ELECTION_CYCLE} strategy"},
-        "economics": {"focus": "Q1 2026 Inflation and Market Volatility"}
-    }
-
+    
     NICHE_PROFILES = {
-        "USA Politics": {"state": "WASHINGTON, D.C.", "status": "draft", "mode": "news"},
-        "Economics": {"state": "NEW YORK, N.Y.", "status": "publish", "mode": "evergreen"},
-        "Tech News": {"state": "SAN FRANCISCO, Calif.", "status": "publish", "mode": "evergreen"},
-        "Sports": {"state": "SANTA CLARA, Calif.", "status": "publish", "mode": "news"},
-        "Entertainment": {"state": "LOS ANGELES, Calif.", "status": "publish", "mode": "news"}
+        "USA Politics": {"state": "WASHINGTON", "status": "draft", "search": "US Capitol"},
+        "Economics": {"state": "NEW YORK", "status": "publish", "search": "Stock Exchange"},
+        "Sports": {"state": "SANTA CLARA", "status": "publish", "search": "NFL Action"},
+        "Crypto": {"state": "MIAMI", "status": "publish", "search": "Digital Currency"}
     }
 
     niche = random.choice(list(NICHE_PROFILES.keys()))
     profile = NICHE_PROFILES[niche]
-    mode = profile["mode"]
 
-    # --- 3. REFINED STYLE ENGINE ---
-    def enforce_mode_constraints(mode, text):
-        if mode == "evergreen":
-            banned = ["today", "yesterday", "this week", "last night", "tonight", "recently", "now", "currently", "at present"]
-            for b in banned:
-                text = re.sub(rf"\b{b}\b", "", text, flags=re.I)
-        return re.sub(r'\s+', ' ', text).strip()
-
-    def enforce_universal_ap_style(text, niche, is_headline=False):
-        if is_headline:
-            # Acronym Protection + Proper AP Case
-            PROTECTED = {"U.S.", "NFL", "AI", "NBA", "FCC", "SEC", "CEO", "GDP", "GOP"}
-            words = text.split()
-            if words:
-                headline = [words[0].title()]
-                for w in words[1:]:
-                    clean_w = w.strip('.,!?:')
-                    headline.append(w if clean_w.upper() in PROTECTED else w.lower())
-                text = ' '.join(headline)
-            
-            # Expanded Title Protection
-            titles = ['coach', 'sen\\.', 'rep\\.', 'gov\\.', 'dr\\.', 'ceo', 'president', 'justice']
-            for title in titles:
-                text = re.sub(f'\\b{title}\\b', title, text, flags=re.I)
-            return text.replace('"', "'")
-
-        text = re.sub(r'\b(Mr\.|Mrs\.|Ms\.)\s', '', text)
-        return text.strip()
-
-    # --- 4. THE "SUBSTANCE" PROMPT (Fixes Length) ---
-    ctx = EDITORIAL_CONTEXT.get(niche.lower(), {"focus": "General Trends"})
-    
-    # NEW: Specific instructions for 3-part structure and 500+ words
+    # --- 3. THE "CITATION-READY" PROMPT ---
     gen_prompt = f"""
-    SYSTEM: You are a senior AP journalist in {CURRENT_YEAR}. 
-    CONTEXT: {ctx}. 
-    TASK: Write a 500-word {niche} article on a major {CURRENT_YEAR} development. 
-    REQUIRED STRUCTURE:
-    1. Lede (30 words max, CITY — dateline format)
-    2. Analysis (2-3 paragraphs of background and current data)
-    3. Outlook (Future implications for the rest of {CURRENT_YEAR})
-    JSON ONLY: {{'headline': '', 'lede': '', 'body': ''}}
+    SYSTEM: Senior News Editor at GCHAM. TODAY IS {CURRENT_DATE}. 
+    STYLE: Inverted Pyramid. Focus on E-E-A-T (Experience, Expertise, Authoritativeness, Trust).
+    CONTEXT: {niche} news for the {CONGRESS}. 
+    JSON STRUCTURE:
+    - "headline": Sentence case AP headline.
+    - "summary": 2-sentence SEO hook in italics for AI crawlers.
+    - "lede": {profile['state']} — Core news paragraph (50 words).
+    - "body": 3-4 paragraphs of context, history, and data.
+    - "outlook": Professional forecast for Q1 2026.
+    - "img_keyword": 2-word photo search term.
     """
-    
+
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     
+    # Retry Loop for Resilience
     data = None
     for attempt in range(3):
         try:
             res = client.chat.completions.create(
-                model="llama-3.3-70b-versatile", 
-                messages=[{"role": "user", "content": gen_prompt}], 
-                response_format={"type": "json_object"}, 
-                timeout=45 # Increased timeout for longer content
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": gen_prompt}],
+                response_format={"type": "json_object"}
             )
-            raw_content = res.choices[0].message.content
-            clean_json = re.sub(r"```json|```", "", raw_content).strip()
-            data = json.loads(clean_json)
+            data = json.loads(re.sub(r"```json|```", "", res.choices[0].message.content).strip())
             break
-        except Exception as e:
-            logging.warning(f"⚠️ Attempt {attempt+1}/3 failed: {e}")
-            time.sleep(2)
-    
+        except Exception: time.sleep(2)
+
     if not data: return
 
-    # --- 5. FINAL ASSEMBLY ---
+    # --- 4. THE ASSEMBLY ---
     try:
-        headline = truncate_headline(enforce_universal_ap_style(data['headline'], niche, True))
-        lede = enforce_mode_constraints(mode, enforce_universal_ap_style(data['lede'], niche))
-        body = enforce_mode_constraints(mode, enforce_universal_ap_style(data['body'], niche))
-
         wp = Client(os.getenv("WP_URL"), os.getenv("WP_USER"), os.getenv("WP_PASS"))
+        
+        # Image Processing
+        img_bits, img_type = get_pexels_image(data['img_keyword'])
+        f_id = None
+        if img_bits:
+            u_res = wp.call(media.UploadFile({'name': f"g_{int(time.time())}.jpg", 'type': img_type, 'bits': xmlrpc_client.Binary(img_bits)}))
+            f_id = u_res['id']
+
+        # Final Scannable Layout
         post = WordPressPost()
-        post.title = headline
-        # Standardized layout for better readability
-        post.content = f"<p>By <strong>Brayan Juma</strong> — Editor</p>{profile['state']} — {lede}\n\n{body}"
+        post.title = enforce_ap_style(data['headline'], True)
+        post.content = f"""
+        <p>By <strong>Brayan Juma</strong> — Editor</p>
+        <p><em>{data['summary']}</em></p>
+        <hr>
+        <p><strong>{enforce_ap_style(data['lede'])}</strong></p>
+        {enforce_ap_style(data['body'])}
+        <br>
+        <h3>Strategic 2026 Outlook</h3>
+        <p>{enforce_ap_style(data['outlook'])}</p>
+        """
         post.post_status = profile['status']
-        post.custom_fields = [{"key": "system_version", "value": SYSTEM_VERSION}]
+        post.thumbnail = f_id
+        post.terms_names = {'category': [niche], 'post_tag': [data['img_keyword'], '2026']}
 
         wp.call(posts.NewPost(post))
-        logging.info(f"✅ v2.2 DEPLOYED: {headline} (Enhanced Length)")
+        logging.info(f"✅ FINAL DEPLOYMENT SUCCESS: {post.title}")
 
-    except Exception as e:
-        logging.error(f"❌ v2.2 FAILED: {e}")
+    except Exception as e: logging.error(f"❌ DEPLOYMENT FAILED: {e}")
 
 if __name__ == "__main__":
     publish()
