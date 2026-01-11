@@ -7,30 +7,28 @@ from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
 
 # --- 1. SYSTEM CONFIG ---
-SYSTEM_VERSION = "GCHAM Empire Shield v5.1"
+SYSTEM_VERSION = "GCHAM Empire Shield v5.3"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_live_context(niche):
     """Fetches real-time 2026 facts for the USA market"""
     tavily_key = os.getenv("TAVILY_API_KEY")
-    if not tavily_key:
-        return "General 2026 industry trends."
+    if not tavily_key: return "General 2026 industry trends."
     
     tavily = TavilyClient(api_key=tavily_key)
-    query = f"Latest breaking {niche} news headlines USA January 12 2026 trending"
+    query = f"Latest breaking {niche} news headlines USA January 2026 investigative"
     
     try:
-        search_result = tavily.search(query=query, topic="news", days=1, max_results=5)
-        context = "REAL-TIME CONTEXT FOR JAN 12, 2026:\n"
+        search_result = tavily.search(query=query, topic="news", days=3, max_results=5)
+        context = "REAL-TIME CONTEXT FOR JANUARY 2026:\n"
         for result in search_result['results']:
             context += f"- {result['title']}: {result['content']}\n"
         return context
     except Exception as e:
         logging.error(f"❌ Search Error: {e}")
-        return "Focus on current 2026 standards."
+        return "Focus on current 2026 technical standards."
 
 def get_pexels_image(query):
-    """Fetches a single image from Pexels based on keyword"""
     api_key = os.getenv("PEXELS_API_KEY")
     if not api_key: return None, None
     headers = {"Authorization": api_key}
@@ -51,7 +49,7 @@ def clean_for_xml(text):
     return "".join(c for c in text if c.isprintable()).encode('utf-8', 'ignore').decode('utf-8')
 
 def publish():
-    # --- 2. CREDENTIALS ---
+    # --- 2. ENVIRONMENT CHECK ---
     groq_api_key = os.getenv("GROQ_API_KEY")
     wp_url = os.getenv("WP_URL")
     wp_user = os.getenv("WP_USER")
@@ -62,28 +60,28 @@ def publish():
         return
 
     NICHE_PROFILES = {
-        "USA Politics": "draft",
-        "Economics": "draft",
-        "Sports": "publish",
-        "Crypto": "publish",
-        "Entertainment": "publish"
+        "USA Politics": "draft", "Economics": "draft",
+        "Sports": "publish", "Crypto": "publish", "Entertainment": "publish"
     }
     niche = random.choice(list(NICHE_PROFILES.keys()))
     live_facts = get_live_context(niche)
     
-    # --- 3. THE 1500-WORD MULTI-IMAGE PROMPT ---
+    # --- 3. THE 1,500-WORD SECTOR-IMPACT PROMPT ---
     system_message = (
-        "You are the Senior Editor for GCHAM News. You write 1,500-word investigative reports. "
-        "STYLE: Use the INVERTED PYRAMID. First 40 words must contain the main news. "
-        "WORD COUNT: You MUST expand on technical analysis, historical context, and future 2026 predictions to reach 1,500 words. "
-        "STYLING: Use <h2>, <h3>, <ul>, and 3 italicized pull-quotes in <p><em><blockquote>...</blockquote></em></p>. "
-        "IMAGE PLACEMENT: You MUST insert the exact text '[[IMAGE_PLACEHOLDER]]' twice in the body where images should go."
+        "You are the Senior Editor for GCHAM News. You MUST write at least 1,500 words. "
+        "STRUCTURE: Use the INVERTED PYRAMID (Lead news in first 40 words). "
+        "EXPANSION LOGIC: To reach the word count, you MUST include these sections:\n"
+        "1. SECTOR IMPACT: Separate H3 sections for Agriculture, Technology, and Manufacturing impact.\n"
+        "2. HISTORICAL CONTEXT: Compare these 2026 events to relevant data from 2020-2025.\n"
+        "3. GEOPOLITICAL IMPLICATIONS: How this affects USA relations with the world.\n"
+        "4. CONSUMER OUTLOOK: Practical advice for the American citizen.\n"
+        "PLACEHOLDERS: Insert '[[IMAGE_PLACEHOLDER]]' twice in the body text."
     )
 
     user_message = (
         f"CONTEXT: {live_facts}\n\n"
-        f"TASK: Write a 1,500-word definitive news report on {niche} for Jan 12, 2026. "
-        "Include a 5-question FAQ at the end with 3 outbound links to Reuters or Bloomberg. "
+        f"TASK: Write a 1,500-word investigative report on {niche} for Jan 12, 2026. "
+        "Include a 5-question FAQ with links to Reuters/Bloomberg at the end. "
         "Return ONLY a raw JSON object: "
         '{"headline": "", "body_html": "", "img_kw_featured": "", "img_kw_body": ""}'
     )
@@ -95,12 +93,12 @@ def publish():
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": system_message}, {"role": "user", "content": user_message}],
             response_format={"type": "json_object"},
-            temperature=0.6
+            temperature=0.5
         )
         data = json.loads(res.choices[0].message.content)
         wp = Client(wp_url, wp_user, wp_pass)
         
-        # --- 4. IMAGE PROCESSING ---
+        # --- 4. MULTI-IMAGE INJECTION ---
         body_content = data.get('body_html', '')
         
         # Featured Image
@@ -111,27 +109,24 @@ def publish():
             f_id = up_feat.get('id')
 
         # Body Image
-        body_bits, body_type = get_pexels_image(data.get('img_kw_body', niche))
+        body_bits, body_type = get_pexels_image(data.get('img_kw_body', f"{niche} industry"))
         if body_bits:
             up_body = wp.call(media.UploadFile({'name': 'body.jpg', 'type': body_type, 'bits': xmlrpc_client.Binary(body_bits)}))
-            body_img_url = up_body.get('url')
-            img_html = f'<figure class="wp-block-image"><img src="{body_img_url}" alt="News Coverage"/></figure>'
-            # Replace placeholders with the actual image
-            body_content = body_content.replace('[[IMAGE_PLACEHOLDER]]', img_html, 1)
+            img_tag = f'<figure class="wp-block-image"><img src="{up_body.get("url")}" alt="2026 Report"/></figure>'
+            body_content = body_content.replace('[[IMAGE_PLACEHOLDER]]', img_tag, 1)
 
         # --- 5. POST ASSEMBLY ---
         post = WordPressPost()
-        post.title = clean_for_xml(data.get('headline', 'GCHAM News Update'))
+        post.title = clean_for_xml(data.get('headline', 'GCHAM News Daily'))
         
-        # Excerpt Signature at the top as requested
-        header_sig = f"<p>By <strong>Brayan Juma</strong> — Chief Editor, GCHAM News</p><hr>"
+        # Author Header & Indexing
+        header_sig = f"<meta name='robots' content='index, follow'><p>By <strong>Brayan Juma</strong> — Chief Editor, GCHAM News</p><hr>"
         post.content = header_sig + clean_for_xml(body_content)
-        
         post.post_status = NICHE_PROFILES[niche]
         if f_id: post.thumbnail = f_id
 
         wp.call(posts.NewPost(post))
-        logging.info(f"✅ SUCCESS: {post.title} posted with 2 images.")
+        logging.info(f"✅ SUCCESS: {post.title} published with full length logic.")
 
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR: {e}")
