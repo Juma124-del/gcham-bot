@@ -20,11 +20,12 @@ jobs:
       - name: Install Tools (FORCED)
         run: |
           python -m pip install --upgrade pip
-          pip install groq python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity
+          pip install groq tavily-python python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity
 
       - name: Run GCHAM Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           WP_URL: ${{ secrets.WP_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
