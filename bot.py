@@ -6,7 +6,7 @@ from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
 
 # --- 1. SYSTEM CONFIG ---
-SYSTEM_VERSION = "GCHAM Final Shield v4.1"
+SYSTEM_VERSION = "GCHAM Final Shield v4.2"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_pexels_image(query):
@@ -29,13 +29,17 @@ def get_pexels_image(query):
 def clean_for_xml(text):
     """Remove characters that crash the WordPress XML-RPC parser"""
     if not text: return ""
-    # Remove non-printable characters and force UTF-8
     return "".join(c for c in text if c.isprintable()).encode('utf-8', 'ignore').decode('utf-8')
 
 def publish():
     # --- 2. ENVIRONMENT CHECK ---
-    if not all([os.getenv("GROQ_API_KEY"), os.getenv("WP_URL"), os.getenv("WP_USER")]):
-        logging.error("❌ Missing Env Variables. Check your .env file.")
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    wp_url = os.getenv("WP_URL")
+    wp_user = os.getenv("WP_USER")
+    wp_pass = os.getenv("WP_PASS")
+
+    if not all([groq_api_key, wp_url, wp_user, wp_pass]):
+        logging.error("❌ Missing Env Variables. Check your Secret Variables / Platform Secrets.")
         return
 
     NICHE_PROFILES = {
@@ -47,23 +51,39 @@ def publish():
     }
     niche = random.choice(list(NICHE_PROFILES.keys()))
     
-    # --- 3. THE REFINED PROMPT ---
-    gen_prompt = f"""Return ONLY a raw JSON object. Topic: {niche} for Jan 10, 2026. 
-    Use h2 and h3 tags. Schema: {{"headline": "", "body_html": "", "img_keyword": ""}}"""
+    # --- 3. THE REFINED "SENIOR EDITOR" PROMPT ---
+    system_message = (
+        "You are the Senior Editor for GCHAM News, a premier USA digital outlet. "
+        "Your style is authoritative and SEO-optimized. Every article MUST be at least 800 words. "
+        "Force professional HTML structure: Use exactly one <h1> for the headline, "
+        "multiple <h2> and <h3> for sections, and <ul> for key takeaways. "
+        "Current date: January 11, 2026. Focus on real-time data and specific names."
+    )
 
-    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    user_message = (
+        f"Generate a professional news report on {niche} for January 11, 2026. "
+        f"Include historical context and 2026 projections. "
+        f"Return ONLY a raw JSON object: "
+        '{"headline": "", "body_html": "", "img_keyword": ""}'
+    )
+
+    client = Groq(api_key=groq_api_key)
     
     try:
-        # Generation with Retry Logic
+        # Generation with JSON Response Format
         res = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": gen_prompt}],
-            response_format={"type": "json_object"}
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7
         )
         data = json.loads(res.choices[0].message.content)
 
-        # --- 4. WordPress CONNECTION ---
-        wp = Client(os.getenv("WP_URL"), os.getenv("WP_USER"), os.getenv("WP_PASS"))
+        # --- 4. WORDPRESS CONNECTION ---
+        wp = Client(wp_url, wp_user, wp_pass)
         
         # Image Handling
         img_bits, img_type = get_pexels_image(data.get('img_keyword', niche))
@@ -80,14 +100,17 @@ def publish():
 
         # --- 5. CLEANING & DEPLOYMENT ---
         post = WordPressPost()
-        # Clean both headline and body to prevent XML-RPC Parse Errors
         post.title = clean_for_xml(data.get('headline', 'GCHAM News Update'))
-        post.content = f"<p>By <strong>Brayan Juma</strong> — Editor</p>" + clean_for_xml(data.get('body_html', ''))
+        
+        # Adding the Signature & Professional Formatting
+        header_sig = f"<p><em>Reported by <strong>Brayan Juma</strong> — Editor</em></p><hr>"
+        post.content = header_sig + clean_for_xml(data.get('body_html', ''))
+        
         post.post_status = NICHE_PROFILES[niche]
         if f_id: post.thumbnail = f_id
 
         wp.call(posts.NewPost(post))
-        logging.info(f"✅ SUCCESS: {post.title}")
+        logging.info(f"✅ SUCCESS: {post.title} (Status: {post.post_status})")
 
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR: {e}")
