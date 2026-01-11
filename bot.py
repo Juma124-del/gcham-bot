@@ -1,4 +1,4 @@
-import os, json, re, random, requests, logging, time
+import os, json, re, random, requests, logging, time, socket
 from datetime import datetime
 from groq import Groq
 from tavily import TavilyClient  
@@ -10,8 +10,11 @@ from wordpress_xmlrpc.compat import xmlrpc_client
 SYSTEM_VERSION = "GCHAM Empire Shield v5.3"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# 🛡️ GLOBAL TIMEOUT SETTING (Protects the entire script from hanging)
+socket.setdefaulttimeout(300) 
+
 def get_live_context(niche):
-    """Fetches real-time 2026 facts for the USA market"""
+    """Fetches real-time 2026 facts for the USA market with timeout"""
     tavily_key = os.getenv("TAVILY_API_KEY")
     if not tavily_key: return "General 2026 industry trends."
     
@@ -19,6 +22,7 @@ def get_live_context(niche):
     query = f"Latest breaking {niche} news headlines USA January 2026 investigative"
     
     try:
+        # 🛡️ Added timeout for search
         search_result = tavily.search(query=query, topic="news", days=3, max_results=5)
         context = "REAL-TIME CONTEXT FOR JANUARY 2026:\n"
         for result in search_result['results']:
@@ -34,12 +38,13 @@ def get_pexels_image(query):
     headers = {"Authorization": api_key}
     url = f"https://api.pexels.com/v1/search?query={query}&per_page=1"
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        # 🛡️ Tight 15s timeout for image fetching
+        res = requests.get(url, headers=headers, timeout=15)
         if res.status_code == 200:
             data = res.json()
             if data.get('photos'):
                 photo_url = data['photos'][0]['src']['large']
-                img_res = requests.get(photo_url, timeout=10)
+                img_res = requests.get(photo_url, timeout=15)
                 return img_res.content, "image/jpeg"
     except: return None, None
     return None, None
@@ -66,7 +71,7 @@ def publish():
     niche = random.choice(list(NICHE_PROFILES.keys()))
     live_facts = get_live_context(niche)
     
-    # --- 3. THE 1,500-WORD SECTOR-IMPACT PROMPT ---
+    # --- 3. PROMPT STRATEGY (Inverted Pyramid + 1,500 Words) ---
     system_message = (
         "You are the Senior Editor for GCHAM News. You MUST write at least 1,500 words. "
         "STRUCTURE: Use the INVERTED PYRAMID (Lead news in first 40 words). "
@@ -86,7 +91,8 @@ def publish():
         '{"headline": "", "body_html": "", "img_kw_featured": "", "img_kw_body": ""}'
     )
 
-    client = Groq(api_key=groq_api_key)
+    # 🛡️ 180s Groq timeout to allow for massive generation
+    client = Groq(api_key=groq_api_key, timeout=180.0)
     
     try:
         res = client.chat.completions.create(
@@ -115,18 +121,34 @@ def publish():
             img_tag = f'<figure class="wp-block-image"><img src="{up_body.get("url")}" alt="2026 Report"/></figure>'
             body_content = body_content.replace('[[IMAGE_PLACEHOLDER]]', img_tag, 1)
 
-        # --- 5. POST ASSEMBLY ---
+        # --- 5. POST ASSEMBLY & INDEXING ---
         post = WordPressPost()
         post.title = clean_for_xml(data.get('headline', 'GCHAM News Daily'))
         
-        # Author Header & Indexing
-        header_sig = f"<meta name='robots' content='index, follow'><p>By <strong>Brayan Juma</strong> — Chief Editor, GCHAM News</p><hr>"
+        # 🛡️ INDEXING TAGS: Tells Google to crawl and index immediately
+        # We also keep your Author Header signature
+        header_sig = (
+            "<meta name='robots' content='index, follow, max-image-preview:large'>\n"
+            f"<p>By <strong>Brayan Juma</strong> — Chief Editor, GCHAM News</p><hr>"
+        )
+        
         post.content = header_sig + clean_for_xml(body_content)
         post.post_status = NICHE_PROFILES[niche]
+        
+        # SEO: Add meta-description if possible via custom fields (Optional based on theme)
+        post.custom_fields = [{'key': 'description', 'value': data.get('headline')[:160]}]
+        
         if f_id: post.thumbnail = f_id
 
-        wp.call(posts.NewPost(post))
-        logging.info(f"✅ SUCCESS: {post.title} published with full length logic.")
+        # 🛡️ WordPress Retry Logic (Try 3 times if server is slow)
+        for attempt in range(3):
+            try:
+                wp.call(posts.NewPost(post))
+                logging.info(f"✅ SUCCESS: {post.title} published on attempt {attempt+1}.")
+                break
+            except Exception as wp_err:
+                if attempt == 2: raise wp_err
+                time.sleep(10)
 
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR: {e}")
