@@ -8,10 +8,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 import httplib2
 
 # ==========================================================
-# 🛡️ SECTION 1: SETUP (USA Professional Standards)
+# 🛡️ SECTION 1: CONFIG
 # ==========================================================
 class Config:
-    VERSION = "GCHAM Empire Shield v6.5"
+    VERSION = "GCHAM Empire Shield v6.6"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
     GROQ_KEY = os.getenv("GROQ_API_KEY")
     TAVILY_KEY = os.getenv("TAVILY_API_KEY")
@@ -23,28 +23,27 @@ class Config:
     INDEXING_FOLDER = "INDEXING_SERVICE_JSON"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-socket.setdefaulttimeout(300)
 
 # ==========================================================
-# 🧠 SECTION 2: FACT-GATHERING (Retains Truth)
+# 🧠 SECTION 2: FACT GATHERING (Safely handling lists)
 # ==========================================================
 
 def get_live_context(niche):
-    """Pulls deep context to prevent hallucinations"""
     tavily = TavilyClient(api_key=Config.TAVILY_KEY)
-    # Increased max_results to 10 for more factual "meat" to write 1500 words
-    query = f"USA {niche} news {Config.CURRENT_DATE} in-depth analysis"
+    query = f"Latest {niche} news USA {Config.CURRENT_DATE} investigative"
     try:
-        search_result = tavily.search(query=query, topic="news", days=1, max_results=10)
-        context = f"STRICT FACTUAL DATA FOR {Config.CURRENT_DATE}:\n"
+        search_result = tavily.search(query=query, topic="news", days=1, max_results=8)
+        fact_list = []
         for res in search_result['results']:
-            context += f"SOURCE: {res['title']}\nCONTENT: {res['content']}\n\n"
-        return context
+            fact_list.append(f"SOURCE: {res['title']}\nFACT: {res['content']}\n")
+        
+        # 🛡️ FIX: Safely join the list into one big string
+        return "\n".join(fact_list) 
     except Exception as e:
-        return "Focus on established 2026 economic trends."
+        return f"Focus on {Config.CURRENT_DATE} industry developments."
 
 # ==========================================================
-# ✍️ SECTION 3: THE EDITOR (The 1,500 Word Logic)
+# ✍️ SECTION 3: THE EDITOR (800-1500 Words + Anti-Hallucination)
 # ==========================================================
 
 def publish():
@@ -53,52 +52,58 @@ def publish():
     
     client = Groq(api_key=Config.GROQ_KEY)
     
-    # 🎯 SYSTEM PROMPT: Forces length and strict adherence to facts
+    # Updated Prompt: Specific word count and strict factual instructions
     system_message = (
         f"You are the Lead Investigative Journalist at GCHAM. Today is {Config.CURRENT_DATE}. "
-        "Your goal is a 1,500-word deep-dive report. "
-        "STRICT RULES: "
-        "1. NO HALLUCINATIONS: Use ONLY the facts provided. If a detail is not in the facts, do not invent it. "
-        "2. WORD COUNT: You must write a minimum of 1,200 words. Expand on the 'Why' and 'Impact' of each fact. "
-        "3. STRUCTURE: Use H1 for the title, a <div> for a 'Google Excerpt', followed by H2 and H3 subheadings. "
-        "4. TONE: Professional, USA-centric, investigative. "
-        "Format: JSON ONLY. Fields: 'headline', 'google_snippet', 'full_report'."
+        "Write an 800-1500 word factual report for a USA audience. "
+        "INSTRUCTIONS: "
+        "1. Start with a 'google_snippet' field (150 chars). "
+        "2. Provide 'full_report' with H1, H2, H3 tags in HTML. "
+        "3. Expand every fact by explaining its economic or social impact on the USA. "
+        "4. STRICT: If you run out of facts, analyze the long-term trends of the topic. DO NOT HALLUCINATE."
+        "Format: JSON ONLY."
     )
 
     try:
-        # Step 1: Generate the high-volume factual content
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": system_message}, 
-                {"role": "user", "content": f"Topic: {niche}\nFACTS TO EXPAND: {live_facts}"}
+                {"role": "user", "content": f"Live Facts: {live_facts}"}
             ],
-            temperature=0.3, # Lower temperature = Less hallucination
+            temperature=0.4, # Low creativity for high accuracy
             response_format={"type": "json_object"}
         )
         data = json.loads(completion.choices[0].message.content)
         
-        # UI Styling for the Snippet
-        snippet_html = (
-            f"<div style='background:#f1f1f1; padding:25px; border-left:8px solid #004a99; margin-bottom:30px;'>"
-            f"<strong>USA NEWS BRIEF (GCHAM EXCERPT):</strong> {data['google_snippet']}</div>"
-        )
-        
-        # Combine content
-        final_body = snippet_html + data['full_report']
+        # 🛡️ FIX: Ensure fields are strings, even if AI accidentally sends a list
+        report_text = data.get('full_report', '')
+        if isinstance(report_text, list):
+            report_text = " ".join(report_text)
+            
+        snippet_text = data.get('google_snippet', '')
+        if isinstance(snippet_text, list):
+            snippet_text = " ".join(snippet_text)
 
-        # WordPress Post
+        # Build Final Content
+        styled_snippet = (
+            f"<div style='background:#f4f4f4; padding:20px; border-left:5px solid #cc0000; margin-bottom:20px;'>"
+            f"<strong>GCHAM INSIGHT:</strong> {snippet_text}</div>"
+        )
+        final_content = styled_snippet + report_text
+
+        # WordPress Push
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
         post = WordPressPost()
-        post.title = data['headline']
-        post.content = final_body
+        post.title = data.get('headline', f"{niche} Intelligence Report - {Config.CURRENT_DATE}")
+        post.content = final_content
         post.post_status = 'publish'
         
         post_id = wp.call(posts.NewPost(post))
-        logging.info(f"🚀 GCHAM Live: {post_id}")
+        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} Published.")
 
     except Exception as e:
-        logging.error(f"❌ Engine Error: {e}")
+        logging.error(f"❌ Execution Error: {e}")
 
 if __name__ == "__main__":
     publish()
