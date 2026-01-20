@@ -8,100 +8,97 @@ from oauth2client.service_account import ServiceAccountCredentials
 import httplib2
 
 # ==========================================================
-# 🛡️ SECTION 1: SETUP & CONFIGURATION (USA Standards)
+# 🛡️ SECTION 1: SETUP (USA Professional Standards)
 # ==========================================================
 class Config:
-    VERSION = "GCHAM Empire Shield v6.4"
-    # 📅 DYNAMIC DATE: Always reflects today's date in 2026
+    VERSION = "GCHAM Empire Shield v6.5"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
-    
     GROQ_KEY = os.getenv("GROQ_API_KEY")
     TAVILY_KEY = os.getenv("TAVILY_API_KEY")
-    BING_KEY = os.getenv("BING_API_KEY")
     WP_URL = os.getenv("WP_URL")
     WP_USER = os.getenv("WP_USER")
     WP_PASS = os.getenv("WP_PASS")
-    
+    BING_KEY = os.getenv("BING_API_KEY")
     DOMAIN = "gcham.com"
     INDEXING_FOLDER = "INDEXING_SERVICE_JSON"
-    
-    # Targeting USA Audience (11am Nairobi is 3am EST / Midnight PST)
-    USA_AUDIENCE = "USA Professionals, Investors, and News Readers"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 socket.setdefaulttimeout(300)
 
 # ==========================================================
-# 🧠 SECTION 2: THE BRAIN (Live & Factual)
+# 🧠 SECTION 2: FACT-GATHERING (Retains Truth)
 # ==========================================================
 
 def get_live_context(niche):
-    """Pulls current 2026 facts specifically for GCHAM"""
+    """Pulls deep context to prevent hallucinations"""
     tavily = TavilyClient(api_key=Config.TAVILY_KEY)
-    query = f"Latest {niche} news headlines USA {Config.CURRENT_DATE} investigative"
+    # Increased max_results to 10 for more factual "meat" to write 1500 words
+    query = f"USA {niche} news {Config.CURRENT_DATE} in-depth analysis"
     try:
-        search_result = tavily.search(query=query, topic="news", days=1, max_results=6)
-        context = f"FACTUAL DATA FOR {Config.CURRENT_DATE}:\n"
+        search_result = tavily.search(query=query, topic="news", days=1, max_results=10)
+        context = f"STRICT FACTUAL DATA FOR {Config.CURRENT_DATE}:\n"
         for res in search_result['results']:
-            context += f"SOURCE: {res['title']}\nFACT: {res['content']}\n\n"
+            context += f"SOURCE: {res['title']}\nCONTENT: {res['content']}\n\n"
         return context
     except Exception as e:
-        return f"Focus on {Config.CURRENT_DATE} economic and political indicators."
+        return "Focus on established 2026 economic trends."
 
 # ==========================================================
-# ✍️ SECTION 3: THE EDITOR (Google Excerpt Priority)
+# ✍️ SECTION 3: THE EDITOR (The 1,500 Word Logic)
 # ==========================================================
 
 def publish():
     niche = random.choice(["USA Politics", "Economics", "Sports", "Crypto", "Entertainment"])
     live_facts = get_live_context(niche)
     
-    # 🎯 SYSTEM INSTRUCTION: Factual, Current, Snippet-First
-    system_message = (
-        f"You are the Senior Editor at GCHAM. Today is {Config.CURRENT_DATE}. "
-        f"Target: {Config.USA_AUDIENCE}. All reports must be 100% FACTUAL. "
-        "OUTPUT STRUCTURE: "
-        "1. GOOGLE EXCERPT: A 150-character data-rich summary for search snippets. "
-        "2. REPORT: 1,500 words with H1-H4 tags. "
-        "3. IMAGE KEYWORDS: High-quality keywords (no names). "
-        "Format: JSON ONLY. Fields: 'headline', 'google_snippet', 'full_report', 'image_kw'."
-    )
-
     client = Groq(api_key=Config.GROQ_KEY)
     
+    # 🎯 SYSTEM PROMPT: Forces length and strict adherence to facts
+    system_message = (
+        f"You are the Lead Investigative Journalist at GCHAM. Today is {Config.CURRENT_DATE}. "
+        "Your goal is a 1,500-word deep-dive report. "
+        "STRICT RULES: "
+        "1. NO HALLUCINATIONS: Use ONLY the facts provided. If a detail is not in the facts, do not invent it. "
+        "2. WORD COUNT: You must write a minimum of 1,200 words. Expand on the 'Why' and 'Impact' of each fact. "
+        "3. STRUCTURE: Use H1 for the title, a <div> for a 'Google Excerpt', followed by H2 and H3 subheadings. "
+        "4. TONE: Professional, USA-centric, investigative. "
+        "Format: JSON ONLY. Fields: 'headline', 'google_snippet', 'full_report'."
+    )
+
     try:
+        # Step 1: Generate the high-volume factual content
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_message}, 
-                      {"role": "user", "content": f"Topic: {niche}\nFacts: {live_facts}"}],
+            messages=[
+                {"role": "system", "content": system_message}, 
+                {"role": "user", "content": f"Topic: {niche}\nFACTS TO EXPAND: {live_facts}"}
+            ],
+            temperature=0.3, # Lower temperature = Less hallucination
             response_format={"type": "json_object"}
         )
         data = json.loads(completion.choices[0].message.content)
         
-        # UI/UX: Google Excerpt Box at the beginning
+        # UI Styling for the Snippet
         snippet_html = (
-            f"<div style='background:#f9f9f9; padding:20px; border-left:6px solid #d32f2f; margin-bottom:25px; font-style:italic;'>"
-            f"<strong>QUICK FACT (Google Excerpt):</strong> {data['google_snippet']}</div>"
+            f"<div style='background:#f1f1f1; padding:25px; border-left:8px solid #004a99; margin-bottom:30px;'>"
+            f"<strong>USA NEWS BRIEF (GCHAM EXCERPT):</strong> {data['google_snippet']}</div>"
         )
-        final_content = snippet_html + data['full_report']
+        
+        # Combine content
+        final_body = snippet_html + data['full_report']
 
-        # WordPress Integration
+        # WordPress Post
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
         post = WordPressPost()
         post.title = data['headline']
-        post.content = final_content
+        post.content = final_body
         post.post_status = 'publish'
         
         post_id = wp.call(posts.NewPost(post))
-        
-        if post_id:
-            full_post = wp.call(posts.GetPost(post_id))
-            # Trigger Indexing for USA Traffic
-            request_google_indexing(full_post.link)
-            request_bing_indexing(full_post.link)
+        logging.info(f"🚀 GCHAM Live: {post_id}")
 
     except Exception as e:
-        logging.error(f"❌ Critical Error: {e}")
+        logging.error(f"❌ Engine Error: {e}")
 
 if __name__ == "__main__":
     publish()
