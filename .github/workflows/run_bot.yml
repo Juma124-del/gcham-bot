@@ -2,7 +2,7 @@ name: GCHAM Auto-Post Engine
 
 on:
   schedule:
-    # This runs 10 times a day (roughly every 2.4 hours)
+    # ⏰ Runs 10 times a day (roughly every 2.4 hours)
     - cron: '0 0,3,5,8,10,13,15,18,20,23 * * *'
   workflow_dispatch: # Manual "Run" button for Juma
 
@@ -18,18 +18,22 @@ jobs:
         with:
           python-version: '3.10'
 
-      # --- NEW: HUMAN-LIKE DELAY ---
+      # --- 🛡️ HUMAN-LIKE DELAY ---
+      # Prevents search engines from seeing a robotic "exact hour" pattern
       - name: Random Delay (1-30 mins)
         run: |
           DELAY=$(( ( RANDOM % 30 ) + 1 ))
-          echo "Waiting for $DELAY minutes before posting..."
+          echo "Waiting for $DELAY minutes before posting to GCHAM..."
           sleep $(( DELAY * 60 ))
 
+      # --- 📦 DEPENDENCY INSTALLATION ---
+      # Includes the missing oauth2client and httplib2 for indexing
       - name: Install Tools (FORCED)
         run: |
           python -m pip install --upgrade pip
-          pip install groq tavily-python python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity
+          pip install groq tavily-python python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity oauth2client httplib2
 
+      # --- 🚀 RUN GCHAM ENGINE ---
       - name: Run GCHAM Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -38,4 +42,7 @@ jobs:
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          BING_API_KEY: ${{ secrets.BING_API_KEY }}
+          # Used if you choose to store Google Key in Secrets instead of Folder
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: python bot.py
