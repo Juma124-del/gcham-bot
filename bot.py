@@ -4,7 +4,7 @@ from groq import Groq
 from tavily import TavilyClient  
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods import posts, media
-from wordpress_xmlrpc.compat import xmlrpc_client
+from wordpress_xmlrpc.compat import xmlrpc_client 
 
 # ==========================================
 # 🛡️ SECTION 1: CONFIG
@@ -15,7 +15,7 @@ class Config:
     GROQ_KEY = os.getenv("GROQ_API_KEY")
     TAVILY_KEY = os.getenv("TAVILY_API_KEY")
     PEXELS_KEY = os.getenv("PEXELS_API_KEY")
-    WP_URL = os.getenv("WP_URL")  # Example: https://worldofvitimbi.com/xmlrpc.php
+    WP_URL = os.getenv("WP_URL")  
     WP_USER = os.getenv("WP_USER")
     WP_PASS = os.getenv("WP_PASS")
 
@@ -53,7 +53,7 @@ def get_and_upload_image(keyword, wp_client):
         return None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (Fixed & Agentic)
+# ✍️ SECTION 3: PUBLISHING (Fixed & 2026 Ready)
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
@@ -70,7 +70,7 @@ def publish():
         search = tavily.search(query=f"latest {niche} news {Config.CURRENT_DATE}", search_depth="advanced")
         context = "\n".join([f"- {r['content']}" for r in search['results']])
 
-        # 3. AI GENERATION PHASE
+        # 3. AI GENERATION PHASE (Updated Model)
         logging.info(f"🧠 AI Generating 1500-word report for {niche}...")
         prompt = f"""
         Return ONLY a JSON object for a news report on {niche}.
@@ -82,7 +82,7 @@ def publish():
         
         chat_completion = groq.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-specdec", # ✅ UPDATED TO ACTIVE 2026 MODEL
             response_format={"type": "json_object"}
         )
         
