@@ -53,7 +53,7 @@ def get_and_upload_image(keyword, wp_client):
         return None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (Fixed & 2026 Ready)
+# ✍️ SECTION 3: PUBLISHING (2026 Stable Version)
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
@@ -70,19 +70,21 @@ def publish():
         search = tavily.search(query=f"latest {niche} news {Config.CURRENT_DATE}", search_depth="advanced")
         context = "\n".join([f"- {r['content']}" for r in search['results']])
 
-        # 3. AI GENERATION PHASE (Updated Model)
+        # 3. AI GENERATION PHASE (Using Stable Versatile Model)
         logging.info(f"🧠 AI Generating 1500-word report for {niche}...")
         prompt = f"""
         Return ONLY a JSON object for a news report on {niche}.
         Include:
         'headline': A viral, professional headline.
         'image_kw': 2-3 keywords for a Pexels image search.
-        'body': 1500 words of deep investigative content. Use H2 and H3 tags for structure. Based on this context: {context}
+        'body': Write a 1500-word deep investigative report. 
+        Use H2 and H3 tags for structure. Ensure the tone is professional and targeting a global audience.
+        Based on this context: {context}
         """
         
         chat_completion = groq.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-specdec", # ✅ UPDATED TO ACTIVE 2026 MODEL
+            model="llama-3.3-70b-versatile", # ✅ STABLE 2026 PRODUCTION MODEL
             response_format={"type": "json_object"}
         )
         
@@ -100,7 +102,7 @@ def publish():
         post.post_status = 'publish'
         post.terms_names = {
             'category': [niche],
-            'post_tag': [niche, 'GCHAM', '2026 News', 'AI Generated']
+            'post_tag': [niche, 'GCHAM', '2026 News', 'AI Investigative']
         }
         
         if image_id:
