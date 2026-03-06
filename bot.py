@@ -1,16 +1,17 @@
 import os, json, re, random, requests, logging, time
 from datetime import datetime
 from groq import Groq
-from tavily import TavilyClient  
+from tavily import TavilyClient
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods import posts, media
-from wordpress_xmlrpc.compat import xmlrpc_client 
+from wordpress_xmlrpc.compat import xmlrpc_client
 
 # ==========================================
 # 🛡️ SECTION 1: CONFIG
 # ==========================================
 class Config:
-    VERSION = "GCHAM Empire Shield v6.7"
+    VERSION = "GCHAM Autonomous Newsroom v7.0"
+    AUTHOR_NAME = "Brayan Juma Okumu"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
     GROQ_KEY = os.getenv("GROQ_API_KEY")
     TAVILY_KEY = os.getenv("TAVILY_API_KEY")
@@ -23,7 +24,6 @@ class Config:
 # 📸 SECTION 2: IMAGE LOGIC
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
-    """Searches Pexels and uploads to WP Media Library"""
     if not Config.PEXELS_KEY: 
         logging.warning("⚠️ Pexels Key missing. Skipping image.")
         return None
@@ -53,7 +53,7 @@ def get_and_upload_image(keyword, wp_client):
         return None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (2026 Stable Version)
+# ✍️ SECTION 3: PUBLISHING (V7.0 UPGRADED)
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
@@ -65,51 +65,83 @@ def publish():
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 2. RESEARCH PHASE
+        # 2. RESEARCH PHASE (Enhanced Context)
         logging.info(f"🔎 GCHAM Researching: {niche}...")
         search = tavily.search(query=f"latest {niche} news {Config.CURRENT_DATE}", search_depth="advanced")
-        context = "\n".join([f"- {r['content']}" for r in search['results']])
+        context = "\n".join([f"Source: {r['url']} | Summary: {r['content']}" for r in search['results']])
 
-        # 3. AI GENERATION PHASE (Using Stable Versatile Model)
-        logging.info(f"🧠 AI Generating 1500-word report for {niche}...")
-        prompt = f"""
-        Return ONLY a JSON object for a news report on {niche}.
+        # 3. AI WRITER PHASE (SEO & Structure Focused)
+        logging.info(f"🧠 AI Drafting report for {niche}...")
+        writer_prompt = f"""
+        Return ONLY a JSON object for a professional news investigation.
         Include:
-        'headline': A viral, professional headline.
-        'image_kw': 2-3 keywords for a Pexels image search.
-        'body': Write a 1500-word deep investigative report. 
-        Use H2 and H3 tags for structure. Ensure the tone is professional and targeting a global audience.
+        'headline': Viral Discover-optimized headline (12-16 words).
+        'meta_description': SEO summary (155 chars).
+        'image_kw': 3 keywords for Pexels.
+        'seo_tags': 5 relevant tags.
+        'body': Write a 1600-word investigative report in HTML. 
+        Use H2 and H3 tags. Structure: Intro -> Key Takeaways (list) -> Detailed Analysis -> Economic Impact -> Conclusion.
         Based on this context: {context}
         """
         
         chat_completion = groq.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile", # ✅ STABLE 2026 PRODUCTION MODEL
+            messages=[{"role": "user", "content": writer_prompt}],
+            model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"}
         )
         
-        # Parse the JSON response
-        data = json.loads(chat_completion.choices[0].message.content)
-        final_content = data.get('body')
+        draft_data = json.loads(chat_completion.choices[0].message.content)
 
-        # 4. IMAGE PHASE
-        image_id = get_and_upload_image(data.get('image_kw', niche), wp)
+        # 4. AI EDITOR PHASE (Humanizing the Tone)
+        logging.info(f"📝 AI Editor humanizing the content...")
+        editor_prompt = f"""
+        You are a Senior Editor at Bloomberg. Rewrite the following article to sound more human, 
+        improve flow, and remove AI-typical clichés. Keep the HTML structure intact.
+        Article: {draft_data.get('body')}
+        """
         
-        # 5. ASSEMBLE & UPLOAD
+        edit_completion = groq.chat.completions.create(
+            messages=[{"role": "user", "content": editor_prompt}],
+            model="llama-3.3-70b-versatile"
+        )
+        humanized_content = edit_completion.choices[0].message.content
+
+        # 5. IMAGE PHASE
+        image_id = get_and_upload_image(draft_data.get('image_kw', niche), wp)
+        
+        # 6. ASSEMBLE & UPLOAD (With E-E-A-T Signals)
+        author_header = f"""
+        <p><strong>By {Config.AUTHOR_NAME}</strong><br>
+        Editor | GCHAM Global Newsroom<br>
+        Published: {Config.CURRENT_DATE}</p><hr>
+        """
+        
+        author_bio = f"""
+        <hr><h3>About the Author</h3>
+        <p><strong>{Config.AUTHOR_NAME}</strong> is the founder and editor of GCHAM, covering geopolitics, economics, and technology for a global audience.</p>
+        """
+
         post = WordPressPost()
-        post.title = data.get('headline')
-        post.content = final_content
-        post.post_status = 'publish'
+        post.title = draft_data.get('headline')
+        post.content = author_header + humanized_body + author_bio
+        post.excerpt = draft_data.get('meta_description')
+        post.post_status = 'draft'  # Change to 'publish' only after AdSense approval
+        
         post.terms_names = {
             'category': [niche],
-            'post_tag': [niche, 'GCHAM', '2026 News', 'AI Investigative']
+            'post_tag': draft_data.get('seo_tags', [niche, 'GCHAM'])
         }
+        
+        # SEO Custom Fields (RankMath)
+        post.custom_fields = [
+            {'key': 'rank_math_description', 'value': draft_data.get('meta_description')}
+        ]
         
         if image_id:
             post.thumbnail = image_id 
             
         post_id = wp.call(posts.NewPost(post))
-        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} live on World of Vitimbi!")
+        logging.info(f"✅ SUCCESS: GCHAM v7 uploaded Post {post_id} to DRAFTS.")
 
     except Exception as e:
         logging.error(f"❌ Execution Error: {e}")
