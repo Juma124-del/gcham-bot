@@ -10,7 +10,7 @@ from wordpress_xmlrpc.compat import xmlrpc_client
 # 🛡️ SECTION 1: CONFIG
 # ==========================================
 class Config:
-    VERSION = "GCHAM Autonomous Newsroom v7.0"
+    VERSION = "GCHAM Empire Shield v7.2"
     AUTHOR_NAME = "Brayan Juma Okumu"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
     GROQ_KEY = os.getenv("GROQ_API_KEY")
@@ -25,27 +25,21 @@ class Config:
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
     if not Config.PEXELS_KEY: 
-        logging.warning("⚠️ Pexels Key missing. Skipping image.")
         return None
-    
     headers = {"Authorization": Config.PEXELS_KEY}
     url = f"https://api.pexels.com/v1/search?query={keyword}&per_page=1"
-    
     try:
         res = requests.get(url, headers=headers).json()
         if not res.get('photos'): return None
-        
         img_url = res['photos'][0]['src']['large']
         img_data = requests.get(img_url).content
         filename = f"gcham_{int(time.time())}.jpg"
-        
         data = {
             'name': filename,
             'type': 'image/jpeg',
             'bits': xmlrpc_client.Binary(img_data),
             'overwrite': True
         }
-        
         upload = wp_client.call(media.UploadFile(data))
         return upload.get('id') 
     except Exception as e:
@@ -53,38 +47,41 @@ def get_and_upload_image(keyword, wp_client):
         return None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (V7.0 UPGRADED & FIXED)
+# ✍️ SECTION 3: PUBLISHING (STRICT SEO VERSION)
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
-    # Target niches for global traffic
-    niche = random.choice(["USA Politics", "Global Economics", "Professional Sports", "Crypto Markets", "Entertainment News"])
+    # UPDATED NICHES FOR MARCH 8, 2026
+    niche = random.choice([
+        "Global Economy (China NPC 2026)", 
+        "Middle East Geopolitics", 
+        "International Women's Day 2026", 
+        "AI Transformation & Jobs", 
+        "Crypto Market Volatility"
+    ])
     
     try:
-        # 1. INITIALIZE CLIENTS
         tavily = TavilyClient(api_key=Config.TAVILY_KEY)
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 2. RESEARCH PHASE (Enhanced Context for Entity SEO)
-        logging.info(f"🔎 GCHAM Researching: {niche}...")
-        search = tavily.search(query=f"latest {niche} news {Config.CURRENT_DATE}", search_depth="advanced")
-        context = "\n".join([f"Source: {r['url']} | Summary: {r['content']}" for r in search['results']])
+        # 2. RESEARCH PHASE
+        logging.info(f"🔎 GCHAM Researching Trending: {niche}...")
+        search = tavily.search(query=f"breaking news {niche} {Config.CURRENT_DATE}", search_depth="advanced")
+        context = "\n".join([f"Source: {r['url']} | Content: {r['content']}" for r in search['results']])
 
-        # 3. AI WRITER PHASE (SEO & Structure Focused)
-        logging.info(f"🧠 AI Drafting report for {niche}...")
+        # 3. AI WRITER PHASE (Strict JSON)
+        logging.info(f"🧠 AI Drafting 1600-word investigative report...")
         writer_prompt = f"""
-        Return ONLY a JSON object for a professional news investigation.
-        Topic: {niche}
+        Return ONLY a JSON object. No intro/outro. 
+        Topic: {niche}. Date: {Config.CURRENT_DATE}. Context: {context}.
         Include:
-        'headline': Viral Discover-optimized headline (12-16 words).
-        'meta_description': SEO summary (155 chars).
-        'image_kw': 3 keywords for Pexels.
-        'seo_tags': 5 relevant tags.
-        'body': Write a 1600-word investigative report in HTML. 
-        Use H2 and H3 tags. Structure: Intro -> Key Takeaways (list) -> Detailed Analysis -> Economic Impact -> Conclusion.
-        Include real-world data and expert-style analysis.
-        Based on this context: {context}
+        'headline': 12-16 word viral, professional headline.
+        'meta_desc': 155 character SEO description.
+        'image_kw': 3 keywords for high-quality Pexels search.
+        'tags': 5 tags including 'GCHAM', '2026 Global News', and niche keywords.
+        'body': Write a 1600-word deep investigative report in HTML. 
+        Structure: H2 Intro, H2 Key Takeaways (Bullet points), H3 Analysis, H3 Global Impact, H2 Conclusion.
         """
         
         chat_completion = groq.chat.completions.create(
@@ -92,71 +89,47 @@ def publish():
             model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"}
         )
-        
         draft_data = json.loads(chat_completion.choices[0].message.content)
+        raw_content = draft_data.get('body')
 
-        # 4. AI EDITOR PHASE (Humanizing the Tone - NO MORE ERRORS)
-        logging.info(f"📝 AI Editor humanizing the content...")
-        editor_prompt = f"""
-        You are a Senior Editor at Bloomberg. Rewrite the following article to sound more human, 
-        improve flow, and remove AI-typical clichés. Ensure there are natural transitions. 
-        Keep all HTML structure intact.
-        Article: {draft_data.get('body')}
-        """
-        
+        # 4. AI EDITOR PHASE (The "Strict Mode" Fix)
+        logging.info(f"📝 AI Editor humanizing and removing AI-isms...")
         edit_completion = groq.chat.completions.create(
-            messages=[{"role": "user", "content": editor_prompt}],
+            messages=[
+                {"role": "system", "content": "You are a Senior Editor at Bloomberg. You only output the final edited HTML. Never speak to the user. No 'Here is your article' or 'I have magic' phrases."},
+                {"role": "user", "content": f"Humanize this report, improve flow, and remove all AI cliches. Keep HTML tags: {raw_content}"}
+            ],
             model="llama-3.3-70b-versatile"
         )
-        # Fixed: Ensuring variable name matches below
-        humanized_content = edit_completion.choices[0].message.content
+        final_body = edit_completion.choices[0].message.content
 
-        # 5. IMAGE PHASE
-        image_id = get_and_upload_image(draft_data.get('image_kw', niche), wp)
-        
-        # 6. ASSEMBLE & UPLOAD (E-E-A-T IDENTITY SIGNALS)
-        # Using div styles for a professional news byline look
+        # 5. ASSEMBLE (E-E-A-T INTEGRATION)
         author_header = f"""
-        <div style="border-left: 4px solid #333; padding-left: 15px; margin-bottom: 25px;">
-            <p><strong>By {Config.AUTHOR_NAME}</strong><br>
-            Editor | GCHAM Global Newsroom<br>
-            Published: {Config.CURRENT_DATE}</p>
-        </div><hr>
+        <p><strong>By {Config.AUTHOR_NAME}</strong><br>
+        <em>Editor-in-Chief | GCHAM Empire News</em><br>
+        Published: {Config.CURRENT_DATE}</p><hr>
         """
         
         author_bio = f"""
-        <hr><div style="margin-top: 40px; padding: 20px; background-color: #f9f9f9;">
-            <h3>About the Author</h3>
-            <p><strong>{Config.AUTHOR_NAME}</strong> is the founder and editor-in-chief of <strong>GCHAM</strong>. 
-            He is a digital media strategist specializing in global geopolitics, market trends, and 
-            technological shifts.</p>
+        <hr><div style="background:#f9f9f9; padding:20px; border-radius:5px;">
+        <h3>About {Config.AUTHOR_NAME}</h3>
+        <p>Brayan Juma Okumu is the founder of GCHAM, a global news hub analyzing the 2026 economic shifts and geopolitics.</p>
         </div>
         """
 
+        # 6. UPLOAD
         post = WordPressPost()
         post.title = draft_data.get('headline')
+        post.content = author_header + final_body + author_bio
+        post.excerpt = draft_data.get('meta_desc')
+        post.post_status = 'draft'
+        post.terms_names = {'category': [niche.split(' (')[0]], 'post_tag': draft_data.get('tags')}
         
-        # Fixed: variable name changed from humanized_body to humanized_content
-        post.content = author_header + humanized_content + author_bio
-        
-        post.excerpt = draft_data.get('meta_description')
-        post.post_status = 'draft'  # Stay as draft for your review
-        
-        post.terms_names = {
-            'category': [niche],
-            'post_tag': draft_data.get('seo_tags', [niche, 'GCHAM'])
-        }
-        
-        # SEO Custom Fields (RankMath Support)
-        post.custom_fields = [
-            {'key': 'rank_math_description', 'value': draft_data.get('meta_description')}
-        ]
-        
-        if image_id:
-            post.thumbnail = image_id 
+        image_id = get_and_upload_image(draft_data.get('image_kw'), wp)
+        if image_id: post.thumbnail = image_id 
             
         post_id = wp.call(posts.NewPost(post))
-        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} is in DRAFTS for Brayan's review.")
+        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} is live as a DRAFT.")
 
     except Exception as e:
         logging.error(f"❌ Execution Error: {e}")
