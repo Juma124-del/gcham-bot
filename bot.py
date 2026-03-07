@@ -53,10 +53,11 @@ def get_and_upload_image(keyword, wp_client):
         return None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (V7.0 UPGRADED)
+# ✍️ SECTION 3: PUBLISHING (V7.0 UPGRADED & FIXED)
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
+    # Target niches for global traffic
     niche = random.choice(["USA Politics", "Global Economics", "Professional Sports", "Crypto Markets", "Entertainment News"])
     
     try:
@@ -65,7 +66,7 @@ def publish():
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 2. RESEARCH PHASE (Enhanced Context)
+        # 2. RESEARCH PHASE (Enhanced Context for Entity SEO)
         logging.info(f"🔎 GCHAM Researching: {niche}...")
         search = tavily.search(query=f"latest {niche} news {Config.CURRENT_DATE}", search_depth="advanced")
         context = "\n".join([f"Source: {r['url']} | Summary: {r['content']}" for r in search['results']])
@@ -74,6 +75,7 @@ def publish():
         logging.info(f"🧠 AI Drafting report for {niche}...")
         writer_prompt = f"""
         Return ONLY a JSON object for a professional news investigation.
+        Topic: {niche}
         Include:
         'headline': Viral Discover-optimized headline (12-16 words).
         'meta_description': SEO summary (155 chars).
@@ -81,6 +83,7 @@ def publish():
         'seo_tags': 5 relevant tags.
         'body': Write a 1600-word investigative report in HTML. 
         Use H2 and H3 tags. Structure: Intro -> Key Takeaways (list) -> Detailed Analysis -> Economic Impact -> Conclusion.
+        Include real-world data and expert-style analysis.
         Based on this context: {context}
         """
         
@@ -92,11 +95,12 @@ def publish():
         
         draft_data = json.loads(chat_completion.choices[0].message.content)
 
-        # 4. AI EDITOR PHASE (Humanizing the Tone)
+        # 4. AI EDITOR PHASE (Humanizing the Tone - NO MORE ERRORS)
         logging.info(f"📝 AI Editor humanizing the content...")
         editor_prompt = f"""
         You are a Senior Editor at Bloomberg. Rewrite the following article to sound more human, 
-        improve flow, and remove AI-typical clichés. Keep the HTML structure intact.
+        improve flow, and remove AI-typical clichés. Ensure there are natural transitions. 
+        Keep all HTML structure intact.
         Article: {draft_data.get('body')}
         """
         
@@ -104,35 +108,46 @@ def publish():
             messages=[{"role": "user", "content": editor_prompt}],
             model="llama-3.3-70b-versatile"
         )
+        # Fixed: Ensuring variable name matches below
         humanized_content = edit_completion.choices[0].message.content
 
         # 5. IMAGE PHASE
         image_id = get_and_upload_image(draft_data.get('image_kw', niche), wp)
         
-        # 6. ASSEMBLE & UPLOAD (With E-E-A-T Signals)
+        # 6. ASSEMBLE & UPLOAD (E-E-A-T IDENTITY SIGNALS)
+        # Using div styles for a professional news byline look
         author_header = f"""
-        <p><strong>By {Config.AUTHOR_NAME}</strong><br>
-        Editor | GCHAM Global Newsroom<br>
-        Published: {Config.CURRENT_DATE}</p><hr>
+        <div style="border-left: 4px solid #333; padding-left: 15px; margin-bottom: 25px;">
+            <p><strong>By {Config.AUTHOR_NAME}</strong><br>
+            Editor | GCHAM Global Newsroom<br>
+            Published: {Config.CURRENT_DATE}</p>
+        </div><hr>
         """
         
         author_bio = f"""
-        <hr><h3>About the Author</h3>
-        <p><strong>{Config.AUTHOR_NAME}</strong> is the founder and editor of GCHAM, covering geopolitics, economics, and technology for a global audience.</p>
+        <hr><div style="margin-top: 40px; padding: 20px; background-color: #f9f9f9;">
+            <h3>About the Author</h3>
+            <p><strong>{Config.AUTHOR_NAME}</strong> is the founder and editor-in-chief of <strong>GCHAM</strong>. 
+            He is a digital media strategist specializing in global geopolitics, market trends, and 
+            technological shifts.</p>
+        </div>
         """
 
         post = WordPressPost()
         post.title = draft_data.get('headline')
-        post.content = author_header + humanized_body + author_bio
+        
+        # Fixed: variable name changed from humanized_body to humanized_content
+        post.content = author_header + humanized_content + author_bio
+        
         post.excerpt = draft_data.get('meta_description')
-        post.post_status = 'draft'  # Change to 'publish' only after AdSense approval
+        post.post_status = 'draft'  # Stay as draft for your review
         
         post.terms_names = {
             'category': [niche],
             'post_tag': draft_data.get('seo_tags', [niche, 'GCHAM'])
         }
         
-        # SEO Custom Fields (RankMath)
+        # SEO Custom Fields (RankMath Support)
         post.custom_fields = [
             {'key': 'rank_math_description', 'value': draft_data.get('meta_description')}
         ]
@@ -141,7 +156,7 @@ def publish():
             post.thumbnail = image_id 
             
         post_id = wp.call(posts.NewPost(post))
-        logging.info(f"✅ SUCCESS: GCHAM v7 uploaded Post {post_id} to DRAFTS.")
+        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} is in DRAFTS for Brayan's review.")
 
     except Exception as e:
         logging.error(f"❌ Execution Error: {e}")
