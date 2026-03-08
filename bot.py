@@ -76,24 +76,28 @@ def publish():
         context = "\n".join([r['content'] for r in search['results']])
 
         writer_prompt = f"""
-        Return ONLY a JSON object. 
-        MANDATORY: Write as a Senior Intelligence Analyst for a global financial newspaper.
-        Topic: {niche}. Data: {mkt}. Context: {context}.
-        
-        STRUCTURE:
-        - Lead: A hard-hitting, 3-sentence summary that explains the global impact.
-        - Body: 1500 words of deep, investigative prose. Use <h2> and <h3> tags for subheadings.
-        - Style: No fluff. Focus on geopolitical strategy, economic shifts, and policy conflict.
-        
+        Return ONLY a JSON object. Topic: {niche}. Data: {mkt}. Context: {context}.
+        MANDATORY: 
+        1. 'headline' MUST be a plain string.
+        2. 'body' MUST be one long HTML string with <p>, <h2>, <h3> tags. NO NESTED DICTIONARIES.
+        3. Use the Inverted Pyramid style.
         Fields: 'headline', 'body', 'meta', 'img_kw', 'tags'.
         """
         
         completion = groq.chat.completions.create(messages=[{"role":"user","content":writer_prompt}], model="llama-3.3-70b-versatile", response_format={"type":"json_object"})
         data = json.loads(completion.choices[0].message.content)
 
+        # 🔧 FIX: Force all data to be strings to prevent "concatenate str (not dict)" error
+        headline = str(data.get('headline', 'GCHAM Intelligence Report'))
+        body_content = data.get('body', '')
+        if isinstance(body_content, dict):
+            # If AI sent a dict, convert it to a readable string/HTML
+            body_content = "".join([f"<h2>{k}</h2><p>{v}</p>" if isinstance(v, str) else str(v) for k, v in body_content.items()])
+        else:
+            body_content = str(body_content)
+
         img_id, img_html = get_and_upload_image(data.get('img_kw', niche), wp)
 
-        # Header Section (Top)
         header = f'''
         <div style="margin-bottom:40px; border-bottom:1px solid #ddd; padding-bottom:10px;">
             <p style="font-size:14px; text-transform:uppercase; letter-spacing:1px; color:#888; margin:0;">{niche} | Investigative Report</p>
@@ -101,35 +105,34 @@ def publish():
         </div>
         '''
         
-        # Author Section (Footer - Bottom)
         footer_bio = f'''
         <div style="margin-top:60px; padding:30px; background:#f9f9f9; border-top:4px solid #1a1a1a; border-radius: 0 0 8px 8px;">
-            <div style="display:flex; align-items:center; gap:20px;">
-                <div>
-                    <h3 style="margin:0; font-size:22px;">Author: {Config.AUTHOR_NAME}</h3>
-                    <p style="margin:5px 0; font-weight:bold; color:#d9534f;">Role: {Config.AUTHOR_ROLE}</p>
-                    <p style="margin:10px 0; line-height:1.6;"><strong>Expertise:</strong> {Config.AUTHOR_EXPERTISE}</p>
-                    <p style="margin:0; line-height:1.6;"><strong>Experience:</strong> {Config.AUTHOR_EXPERIENCE}</p>
-                </div>
-            </div>
+            <h3 style="margin:0; font-size:22px;">Author: {Config.AUTHOR_NAME}</h3>
+            <p style="margin:5px 0; font-weight:bold; color:#d9534f;">Role: {Config.AUTHOR_ROLE}</p>
+            <p style="margin:10px 0; line-height:1.6;"><strong>Expertise:</strong> {Config.AUTHOR_EXPERTISE}</p>
+            <p style="margin:0; line-height:1.6;"><strong>Experience:</strong> {Config.AUTHOR_EXPERIENCE}</p>
         </div>
         '''
 
-        # Post Assembly
+        # Post Assembly (Safe Concatenation)
         post = WordPressPost()
-        post.title = data.get('headline')
-        post.content = header + img_html + data.get('body') + footer_bio
-        post.terms_names = {'post_tag': data.get('tags', [niche]), 'category': [niche]}
+        post.title = headline
+        post.content = str(header) + str(img_html) + body_content + str(footer_bio)
+        
+        # Tags processing
+        raw_tags = data.get('tags', [niche])
+        post.terms_names = {'post_tag': [str(t) for t in raw_tags] if isinstance(raw_tags, list) else [niche], 'category': [niche]}
+        
         post.custom_fields = [
-            {'key': '_rank_math_title', 'value': data.get('headline')},
-            {'key': '_rank_math_description', 'value': data.get('meta')},
-            {'key': '_rank_math_focus_keyword', 'value': data.get('img_kw')}
+            {'key': '_rank_math_title', 'value': headline},
+            {'key': '_rank_math_description', 'value': str(data.get('meta', ''))},
+            {'key': '_rank_math_focus_keyword', 'value': str(data.get('img_kw', niche))}
         ]
         post.post_status = 'publish'
         if img_id: post.thumbnail = img_id
         
         wp.call(posts.NewPost(post))
-        logging.info(f"✅ GCHAM PREMIER: {niche} article published with Footer Bio.")
+        logging.info(f"✅ GCHAM SUCCESS: {niche} published smoothly.")
 
     except Exception as e: logging.error(f"❌ Error: {e}")
 
