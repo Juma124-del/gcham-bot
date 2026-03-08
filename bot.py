@@ -20,7 +20,7 @@ class Config:
     WP_PASS = os.getenv("WP_PASS")
 
 # ==========================================
-# 📈 NEW: ROBUST MARKET DATA (GitHub Friendly)
+# 📈 ROBUST MARKET DATA
 # ==========================================
 def get_live_market_data():
     exchanges_to_try = ['kraken', 'coinbasepro', 'okx']
@@ -29,14 +29,13 @@ def get_live_market_data():
             exchange_class = getattr(ccxt, ex_id)()
             btc = exchange_class.fetch_ticker('BTC/USD')['last']
             eth = exchange_class.fetch_ticker('ETH/USD')['last']
-            return f"BTC: ${btc:,.0f} | ETH: ${eth:,.0f} (Market Data via {ex_id.upper()})"
-        except Exception as e:
-            logging.warning(f"⚠️ {ex_id} failed: {e}")
+            return f"BTC: ${btc:,.0f} | ETH: ${eth:,.0f} (via {ex_id.upper()})"
+        except:
             continue
     return "Market Status: Highly Volatile | Monitoring Global Liquidity"
 
 # ==========================================
-# 📸 SECTION 2: IMAGE & CITATION ENGINE
+# 📸 IMAGE ENGINE
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
     if not Config.PEXELS_KEY: return None, ""
@@ -47,7 +46,7 @@ def get_and_upload_image(keyword, wp_client):
         if not res.get('photos'): return None, ""
         photo = res['photos'][0]
         img_url, photographer, pexels_url = photo['src']['large'], photo['photographer'], photo['url']
-        citation = f'<figcaption style="font-size:12px; color:#777; margin-top:5px;">Photo by <a href="{pexels_url}" target="_blank">{photographer}</a> via Pexels</figcaption>'
+        citation = f'<figcaption style="font-size:12px; color:#777;">Photo by <a href="{pexels_url}" target="_blank">{photographer}</a> via Pexels</figcaption>'
         img_data = requests.get(img_url).content
         filename = f"gcham_media_{int(time.time())}.jpg"
         data = {'name': filename, 'type': 'image/jpeg', 'bits': xmlrpc_client.Binary(img_data), 'overwrite': True}
@@ -58,7 +57,7 @@ def get_and_upload_image(keyword, wp_client):
     except: return None, ""
 
 # ==========================================
-# 🚀 SECTION 3: THE AUTOMATED NEWSROOM
+# 🚀 AUTOMATED NEWSROOM
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
@@ -71,52 +70,60 @@ def publish():
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
         mkt = get_live_market_data()
-
         query = f"trending news {niche} USA France {Config.CURRENT_DATE}"
         logging.info(f"🔎 GCHAM Researching: {query}")
+        
         search = tavily.search(query=query, search_depth="advanced")
         context = "\n".join([r['content'] for r in search['results']])
 
-        # ✍️ UPDATED WRITER PROMPT WITH INVERTED PYRAMID
         writer_prompt = f"""
         Return ONLY JSON. Topic: {niche}. Context: {context}. Data: {mkt}. 
         MANDATORY STYLE: Use the INVERTED PYRAMID journalism structure. 
         - LEAD: Answer Who, What, Where, When, Why in Paragraph 1.
-        - BODY: Layer crucial details, investigative analysis, and Market Data ({mkt}) by decreasing importance. 
-        - FORMAT: Short paragraphs, H2/H3 every 300 words. Target 1500 words in professional HTML.
-        Fields: 'headline', 'body', 'img_kw', 'meta', 'tags' (list).
-        Target high SEO visibility in USA and France.
+        - BODY: Layer crucial details and investigative analysis. Use H2/H3 every 300 words.
+        - FORMAT: 1500 words in professional HTML.
+        Fields: 'headline', 'body', 'img_kw', 'meta', 'tags' (MUST be a simple list of strings).
         """
+        
         completion = groq.chat.completions.create(messages=[{"role":"user","content":writer_prompt}], model="llama-3.3-70b-versatile", response_format={"type":"json_object"})
         data = json.loads(completion.choices[0].message.content)
+
+        # 🔧 BUG FIX: Ensure Tags are a list of strings
+        raw_tags = data.get('tags', [niche, 'GCHAM', 'News'])
+        if isinstance(raw_tags, dict): raw_tags = list(raw_tags.values())
+        clean_tags = [str(t) for t in raw_tags]
 
         img_id, img_html = get_and_upload_image(data.get('img_kw', niche), wp)
 
         author_header = f'<div style="border-left:4px solid #333; padding-left:15px; margin-bottom:25px;"><p><strong>By {Config.AUTHOR_NAME}</strong><br>Editor-in-Chief | GCHAM Newsroom<br>{Config.CURRENT_DATE} | {mkt}</p></div><hr>'
         author_bio = f'<hr><div style="margin-top:40px; padding:25px; background:#f9f9f9; border-radius:8px;"><h3>About the Author</h3><p><strong>{Config.AUTHOR_NAME}</strong> is the founder of GCHAM, tracking 2026 global shifts in USA and France.</p></div>'
 
+        # 📝 ASSEMBLE POST
         post = WordPressPost()
-        post.title = data.get('headline')
-        post.content = author_header + img_html + data.get('body') + author_bio
+        post.title = str(data.get('headline'))
+        post.content = author_header + img_html + str(data.get('body')) + author_bio
         
+        # Category & Tag Assignment
         post.terms_names = {
-            'post_tag': data.get('tags', [niche, 'GCHAM', 'Trending']),
+            'post_tag': clean_tags,
             'category': [niche]
         }
 
+        # RankMath SEO Fields
         post.custom_fields = [
-            {'key': '_rank_math_title', 'value': data.get('headline')},
-            {'key': '_rank_math_description', 'value': data.get('meta')},
-            {'key': '_rank_math_focus_keyword', 'value': data.get('img_kw')}
+            {'key': '_rank_math_title', 'value': str(data.get('headline'))},
+            {'key': '_rank_math_description', 'value': str(data.get('meta'))},
+            {'key': '_rank_math_focus_keyword', 'value': str(data.get('img_kw'))}
         ]
 
         post.post_status = 'publish' 
         if img_id: post.thumbnail = img_id
         
         wp.call(posts.NewPost(post))
-        logging.info(f"🚀 GCHAM SUCCESS: Published {niche} in Pyramid Style by {Config.AUTHOR_NAME}.")
+        logging.info(f"🚀 GCHAM SUCCESS: {niche} published by {Config.AUTHOR_NAME}!")
 
-    except Exception as e: logging.error(f"❌ Error: {e}")
+    except Exception as e: 
+        logging.error(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     publish()
