@@ -1,4 +1,4 @@
-import os, json, re, random, requests, logging, time
+import os, json, random, requests, logging, time
 from datetime import datetime
 from groq import Groq
 from tavily import TavilyClient
@@ -7,132 +7,122 @@ from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
 
 # ==========================================
-# 🛡️ SECTION 1: CONFIG
+# 🛡️ SECTION 1: CONFIG & KEYS
 # ==========================================
 class Config:
-    VERSION = "GCHAM Empire Shield v7.2"
     AUTHOR_NAME = "Brayan Juma Okumu"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
-    GROQ_KEY = os.getenv("GROQ_API_KEY")
-    TAVILY_KEY = os.getenv("TAVILY_API_KEY")
-    PEXELS_KEY = os.getenv("PEXELS_API_KEY")
-    WP_URL = os.getenv("WP_URL")  
-    WP_USER = os.getenv("WP_USER")
-    WP_PASS = os.getenv("WP_PASS")
+    
+    # 🔑 REPLACE THESE STRINGS WITH YOUR REAL KEYS
+    GROQ_KEY = "your_gsk_key_here" 
+    TAVILY_KEY = "your_tvly_key_here"
+    PEXELS_KEY = "your_pexels_key_here"
+    WP_URL = "https://gcham.com/xmlrpc.php"
+    WP_USER = "your_wp_username"
+    WP_PASS = "your_wp_app_password"
 
 # ==========================================
-# 📸 SECTION 2: IMAGE LOGIC
+# 📸 SECTION 2: ETHICAL IMAGE LOGIC
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
-    if not Config.PEXELS_KEY: 
-        return None
+    if not Config.PEXELS_KEY: return None, None
     headers = {"Authorization": Config.PEXELS_KEY}
     url = f"https://api.pexels.com/v1/search?query={keyword}&per_page=1"
     try:
         res = requests.get(url, headers=headers).json()
-        if not res.get('photos'): return None
-        img_url = res['photos'][0]['src']['large']
+        if not res.get('photos'): return None, None
+        
+        photo = res['photos'][0]
+        img_url = photo['src']['large']
+        photographer = photo['photographer']
+        
+        # Ethical Credit & Caption
+        caption = f"Visual representation of {keyword}. Credit: {photographer} via Pexels."
         img_data = requests.get(img_url).content
-        filename = f"gcham_{int(time.time())}.jpg"
+        
         data = {
-            'name': filename,
+            'name': f"gcham_{int(time.time())}.jpg",
             'type': 'image/jpeg',
             'bits': xmlrpc_client.Binary(img_data),
+            'caption': caption,
             'overwrite': True
         }
         upload = wp_client.call(media.UploadFile(data))
-        return upload.get('id') 
+        return upload.get('id'), caption
     except Exception as e:
         logging.error(f"❌ Image Error: {e}")
-        return None
+        return None, None
 
 # ==========================================
-# ✍️ SECTION 3: PUBLISHING (STRICT SEO VERSION)
+# 🌍 SECTION 3: THE GLOBAL SCOUT
 # ==========================================
 def publish():
     logging.basicConfig(level=logging.INFO)
-    # UPDATED NICHES FOR MARCH 8, 2026
-    niche = random.choice([
-        "Global Economy (China NPC 2026)", 
-        "Middle East Geopolitics", 
-        "International Women's Day 2026", 
-        "AI Transformation & Jobs", 
-        "Crypto Market Volatility"
-    ])
-    
     try:
         tavily = TavilyClient(api_key=Config.TAVILY_KEY)
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 2. RESEARCH PHASE
-        logging.info(f"🔎 GCHAM Researching Trending: {niche}...")
-        search = tavily.search(query=f"breaking news {niche} {Config.CURRENT_DATE}", search_depth="advanced")
-        context = "\n".join([f"Source: {r['url']} | Content: {r['content']}" for r in search['results']])
+        # 🚀 SCOUTING
+        logging.info("🌍 Scouting Global Trends (USA, UK, France, China, Japan)...")
+        scout = tavily.search(query="breaking news politics economics 2026", search_depth="advanced")
+        trends = "\n".join([f"- {r['title']}" for r in scout['results']])
 
-        # 3. AI WRITER PHASE (Strict JSON)
-        logging.info(f"🧠 AI Drafting 1600-word investigative report...")
+        # 🚀 DECISION
+        decision = groq.chat.completions.create(
+            messages=[{"role": "user", "content": f"Pick the #1 most important story from: {trends}. Return ONLY the name."}],
+            model="llama-3.3-70b-versatile"
+        ).choices[0].message.content.strip()
+
+        # 🚀 RESEARCH & EXTERNAL LINKS
+        search = tavily.search(query=f"investigative details {decision}", search_depth="advanced")
+        sources = "\n".join([f"Source: {r['url']}" for r in search['results'][:3]]) # Get top 3 links
+        context = "\n".join([r['content'] for r in search['results']])
+
+        # 🚀 WRITING PHASE
         writer_prompt = f"""
-        Return ONLY a JSON object. No intro/outro. 
-        Topic: {niche}. Date: {Config.CURRENT_DATE}. Context: {context}.
-        Include:
-        'headline': 12-16 word viral, professional headline.
-        'meta_desc': 155 character SEO description.
-        'image_kw': 3 keywords for high-quality Pexels search.
-        'tags': 5 tags including 'GCHAM', '2026 Global News', and niche keywords.
-        'body': Write a 1600-word deep investigative report in HTML. 
-        Structure: H2 Intro, H2 Key Takeaways (Bullet points), H3 Analysis, H3 Global Impact, H2 Conclusion.
+        Return ONLY a JSON object. Topic: {decision}. Context: {context}. 
+        Sources to cite: {sources}.
+        1. 'headline': Viral, journalistic title.
+        2. 'excerpt': 2-sentence SEO summary for Google.
+        3. 'body': 1600-word investigative report in HTML. 
+           - Include 2-3 external links to reputable sources (like Reuters, AP, or the source links provided).
+           - Use H2 and H3 tags.
+        4. 'image_kw': Keyword for Pexels.
         """
         
-        chat_completion = groq.chat.completions.create(
+        draft = json.loads(groq.chat.completions.create(
             messages=[{"role": "user", "content": writer_prompt}],
             model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"}
-        )
-        draft_data = json.loads(chat_completion.choices[0].message.content)
-        raw_content = draft_data.get('body')
+            response_format={"type": "json_object"},
+            max_tokens=4000
+        ).choices[0].message.content)
 
-        # 4. AI EDITOR PHASE (The "Strict Mode" Fix)
-        logging.info(f"📝 AI Editor humanizing and removing AI-isms...")
-        edit_completion = groq.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a Senior Editor at Bloomberg. You only output the final edited HTML. Never speak to the user. No 'Here is your article' or 'I have magic' phrases."},
-                {"role": "user", "content": f"Humanize this report, improve flow, and remove all AI cliches. Keep HTML tags: {raw_content}"}
-            ],
-            model="llama-3.3-70b-versatile"
-        )
-        final_body = edit_completion.choices[0].message.content
-
-        # 5. ASSEMBLE (E-E-A-T INTEGRATION)
-        author_header = f"""
-        <p><strong>By {Config.AUTHOR_NAME}</strong><br>
-        <em>Editor-in-Chief | GCHAM Empire News</em><br>
-        Published: {Config.CURRENT_DATE}</p><hr>
-        """
+        # 🚀 ASSEMBLY
+        image_id, img_caption = get_and_upload_image(draft['image_kw'], wp)
         
-        author_bio = f"""
-        <hr><div style="background:#f9f9f9; padding:20px; border-radius:5px;">
-        <h3>About {Config.AUTHOR_NAME}</h3>
-        <p>Brayan Juma Okumu is the founder of GCHAM, a global news hub analyzing the 2026 economic shifts and geopolitics.</p>
+        # Construct Clean Post
+        full_content = f"""
+        <div style="background:#f0f7ff; padding:15px; border-left:5px solid #0056b3; margin-bottom:20px;">
+            <strong>Quick Summary:</strong> {draft['excerpt']}
         </div>
+        {draft['body']}
+        <p style="font-size:0.8em; color:gray;">Featured Image: {img_caption}</p>
+        <hr>
+        <p><em>Reported by {Config.AUTHOR_NAME}, GCHAM Empire.</em></p>
         """
 
-        # 6. UPLOAD
         post = WordPressPost()
-        post.title = draft_data.get('headline')
-        post.content = author_header + final_body + author_bio
-        post.excerpt = draft_data.get('meta_desc')
-        post.post_status = 'draft'
-        post.terms_names = {'category': [niche.split(' (')[0]], 'post_tag': draft_data.get('tags')}
+        post.title = draft['headline']
+        post.content = full_content
+        post.post_status = 'publish' # SET TO DRAFT IF YOU WANT TO CHECK FIRST
+        if image_id: post.thumbnail = image_id
         
-        image_id = get_and_upload_image(draft_data.get('image_kw'), wp)
-        if image_id: post.thumbnail = image_id 
-            
         post_id = wp.call(posts.NewPost(post))
-        logging.info(f"✅ GCHAM SUCCESS: Post {post_id} is live as a DRAFT.")
+        logging.info(f"✅ GCHAM SUCCESS: Article {post_id} is live.")
 
     except Exception as e:
-        logging.error(f"❌ Execution Error: {e}")
+        logging.error(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     publish()
