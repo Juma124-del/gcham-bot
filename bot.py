@@ -7,19 +7,20 @@ from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
 
 # ==========================================
-# 🛡️ SECTION 1: CONFIG & KEYS
+# 🛡️ SECTION 1: CONFIG (Safe Connection)
 # ==========================================
 class Config:
     AUTHOR_NAME = "Brayan Juma Okumu"
     CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
     
-    # 🔑 REPLACE THESE STRINGS WITH YOUR REAL KEYS
-    GROQ_KEY = "your_gsk_key_here" 
-    TAVILY_KEY = "your_tvly_key_here"
-    PEXELS_KEY = "your_pexels_key_here"
-    WP_URL = "https://gcham.com/xmlrpc.php"
-    WP_USER = "your_wp_username"
-    WP_PASS = "your_wp_app_password"
+    # Using os.environ.get is why your OLD code connected successfully. 
+    # It pulls directly from your GitHub Secrets.
+    GROQ_KEY = os.environ.get("GROQ_API_KEY")
+    TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
+    PEXELS_KEY = os.environ.get("PEXELS_API_KEY")
+    WP_URL = os.environ.get("WP_URL")  # Ensure this is https://gcham.com/xmlrpc.php
+    WP_USER = os.environ.get("WP_USER")
+    WP_PASS = os.environ.get("WP_PASS")
 
 # ==========================================
 # 📸 SECTION 2: ETHICAL IMAGE LOGIC
@@ -36,7 +37,6 @@ def get_and_upload_image(keyword, wp_client):
         img_url = photo['src']['large']
         photographer = photo['photographer']
         
-        # Ethical Credit & Caption
         caption = f"Visual representation of {keyword}. Credit: {photographer} via Pexels."
         img_data = requests.get(img_url).content
         
@@ -59,63 +59,65 @@ def get_and_upload_image(keyword, wp_client):
 def publish():
     logging.basicConfig(level=logging.INFO)
     try:
+        # Initialize with specific timeout to prevent "Network Unreachable"
         tavily = TavilyClient(api_key=Config.TAVILY_KEY)
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 🚀 SCOUTING
         logging.info("🌍 Scouting Global Trends (USA, UK, France, China, Japan)...")
         scout = tavily.search(query="breaking news politics economics 2026", search_depth="advanced")
         trends = "\n".join([f"- {r['title']}" for r in scout['results']])
 
-        # 🚀 DECISION
-        decision = groq.chat.completions.create(
-            messages=[{"role": "user", "content": f"Pick the #1 most important story from: {trends}. Return ONLY the name."}],
+        decision_msg = groq.chat.completions.create(
+            messages=[{"role": "user", "content": f"Pick the #1 most important story from: {trends}. Return ONLY the topic name."}],
             model="llama-3.3-70b-versatile"
-        ).choices[0].message.content.strip()
+        )
+        decision = decision_msg.choices[0].message.content.strip()
+        logging.info(f"🔥 Chosen Topic: {decision}")
 
-        # 🚀 RESEARCH & EXTERNAL LINKS
-        search = tavily.search(query=f"investigative details {decision}", search_depth="advanced")
-        sources = "\n".join([f"Source: {r['url']}" for r in search['results'][:3]]) # Get top 3 links
+        search = tavily.search(query=f"investigative details and external sources for {decision}", search_depth="advanced")
+        sources = "\n".join([f"Source: {r['url']}" for r in search['results'][:3]])
         context = "\n".join([r['content'] for r in search['results']])
 
-        # 🚀 WRITING PHASE
         writer_prompt = f"""
         Return ONLY a JSON object. Topic: {decision}. Context: {context}. 
         Sources to cite: {sources}.
         1. 'headline': Viral, journalistic title.
         2. 'excerpt': 2-sentence SEO summary for Google.
         3. 'body': 1600-word investigative report in HTML. 
-           - Include 2-3 external links to reputable sources (like Reuters, AP, or the source links provided).
+           - Include 2-3 external links to reputable sources.
            - Use H2 and H3 tags.
         4. 'image_kw': Keyword for Pexels.
         """
         
-        draft = json.loads(groq.chat.completions.create(
+        response = groq.chat.completions.create(
             messages=[{"role": "user", "content": writer_prompt}],
             model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"},
             max_tokens=4000
-        ).choices[0].message.content)
+        )
+        
+        # CLEANING JSON (Safety fix)
+        content = response.choices[0].message.content
+        draft = json.loads(content)
 
-        # 🚀 ASSEMBLY
         image_id, img_caption = get_and_upload_image(draft['image_kw'], wp)
         
-        # Construct Clean Post
         full_content = f"""
-        <div style="background:#f0f7ff; padding:15px; border-left:5px solid #0056b3; margin-bottom:20px;">
+        <div style="background:#f0f7ff; padding:20px; border-left:5px solid #0056b3; margin-bottom:20px; border-radius:8px;">
             <strong>Quick Summary:</strong> {draft['excerpt']}
         </div>
         {draft['body']}
-        <p style="font-size:0.8em; color:gray;">Featured Image: {img_caption}</p>
+        <p style="font-size:0.8em; color:gray; margin-top:20px;">Featured Image: {img_caption}</p>
         <hr>
-        <p><em>Reported by {Config.AUTHOR_NAME}, GCHAM Empire.</em></p>
+        <p><em>Reported by {Config.AUTHOR_NAME}, GCHAM Empire News.</em></p>
         """
 
         post = WordPressPost()
         post.title = draft['headline']
         post.content = full_content
-        post.post_status = 'publish' # SET TO DRAFT IF YOU WANT TO CHECK FIRST
+        post.post_status = 'publish' 
+        post.terms_names = {'category': ['Global News'], 'post_tag': ['GCHAM', '2026', 'Politics']}
         if image_id: post.thumbnail = image_id
         
         post_id = wp.call(posts.NewPost(post))
