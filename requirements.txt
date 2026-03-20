@@ -7,3 +7,4 @@ Pillow
 tenacity
 python-slugify
 feedparser
+pytrends
