@@ -5,23 +5,55 @@ from tavily import TavilyClient
 from wordpress_xmlrpc import Client, WordPressPost
 from wordpress_xmlrpc.methods import posts, media
 from wordpress_xmlrpc.compat import xmlrpc_client
+from pytrends.request import TrendReq 
 
 # ==========================================
-# 🛡️ SECTION 1: CONFIG (GitHub Secrets)
+# 🛡️ SECTION 1: CONFIG & IDENTITY
 # ==========================================
 class Config:
     AUTHOR_NAME = "Brayan Juma Okumu"
-    CURRENT_DATE = datetime.now().strftime("%B %d, %Y")
-    
+    SITE_NAME = "GCHAM Empire"
+    GEOGRAPHY = "Worldwide (Global News)" 
+
     GROQ_KEY = os.environ.get("GROQ_API_KEY")
     TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
     PEXELS_KEY = os.environ.get("PEXELS_API_KEY")
-    WP_URL = os.environ.get("WP_URL")  # https://gcham.com/xmlrpc.php
+    WP_URL = os.environ.get("WP_URL")
     WP_USER = os.environ.get("WP_USER")
     WP_PASS = os.environ.get("WP_PASS")
 
 # ==========================================
-# 📸 SECTION 2: ETHICAL IMAGE LOGIC
+# 🔥 SECTION 2: FAIL-SAFE TREND SCOUTING
+# ==========================================
+def get_trending_topics(tavily_client):
+    try:
+        # Attempt 1: Google Trends Library
+        pytrends = TrendReq(hl='en-US', tz=360)
+        trending = pytrends.trending_searches(pn='united_states')
+        return trending[0].tolist()[:10]
+    except Exception as e:
+        logging.warning(f"⚠️ Pytrends blocked: {e}. Switching to Tavily Live Scouting...")
+        # Attempt 2: Live Web Scouting (Fail-Safe)
+        search = tavily_client.search(query="top trending global news headlines today March 2026", search_depth="basic")
+        return [r['title'] for r in search['results'][:10]]
+
+# ==========================================
+# 🔗 SECTION 3: INTERNAL LINKING & SEO
+# ==========================================
+def add_internal_links(content):
+    links = [
+        ("global economy", "https://gcham.com/category/economics"),
+        ("breaking news", "https://gcham.com"),
+        ("football", "https://gcham.com/category/sports"),
+        ("crypto", "https://gcham.com/category/crypto"),
+    ]
+    for keyword, url in links:
+        if keyword in content.lower():
+            content = content.replace(keyword, f'<a href="{url}">{keyword}</a>', 1)
+    return content
+
+# ==========================================
+# 📸 SECTION 4: IMAGE HANDLER (SEO ALT TEXT)
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
     if not Config.PEXELS_KEY: return None, None
@@ -30,118 +62,107 @@ def get_and_upload_image(keyword, wp_client):
     try:
         res = requests.get(url, headers=headers).json()
         if not res.get('photos'): return None, None
-        
         photo = res['photos'][0]
         img_url = photo['src']['large']
-        photographer = photo['photographer']
-        
-        caption = f"Visual representation of {keyword}. Credit: {photographer} via Pexels."
-        img_data = requests.get(img_url).content
-        
         data = {
             'name': f"gcham_{int(time.time())}.jpg",
             'type': 'image/jpeg',
-            'bits': xmlrpc_client.Binary(img_data),
-            'caption': caption,
+            'bits': xmlrpc_client.Binary(requests.get(img_url).content),
+            'caption': f"{keyword} - Photo via Pexels for GCHAM",
+            'description': keyword,  # SEO ALT TEXT
             'overwrite': True
         }
         upload = wp_client.call(media.UploadFile(data))
-        return upload.get('id'), caption
-    except Exception as e:
-        logging.error(f"❌ Image Error: {e}")
-        return None, None
+        return upload.get('id'), f"Visual representation of {keyword}"
+    except: return None, None
 
 # ==========================================
-# 🌍 SECTION 3: THE GLOBAL SCOUT (Elite Update)
+# ✍️ SECTION 5: THE ANTI-HALLUCINATION WRITER
 # ==========================================
-def publish():
+def write_global_report(groq, topic, context, target_words):
+    writer_prompt = f"""
+    Return ONLY a JSON object. You are a Senior Investigative Journalist for GCHAM Empire.
+    
+    TOPIC: {topic}
+    FACTUAL CONTEXT: {context}
+    TARGET: {target_words} words.
+
+    🛡️ ANTI-HALLUCINATION RULES:
+    - DO NOT invent facts, quotes, or statistics.
+    - Only use information from the provided CONTEXT.
+    - If uncertain, say "reports suggest" instead of guessing.
+
+    🚫 ANTI-LAZY RULES:
+    - Avoid "In conclusion" or generic summaries.
+    - Each section must add NEW insight or a specific real-world impact.
+    - Write for a Worldwide audience (USA, Europe, Africa, Asia).
+
+    OUTPUT FORMAT:
+    {{
+      "headline": "Viral title",
+      "excerpt": "Compelling summary",
+      "keywords": "SEO keywords",
+      "body": "HTML Content (1200+ words)",
+      "category": "Politics, Economics, Sports, or Entertainment",
+      "image_kw": "Photography keyword"
+    }}
+    """
+    res = groq.chat.completions.create(
+        messages=[{"role": "user", "content": writer_prompt}],
+        model="llama-3.3-70b-versatile",
+        response_format={"type": "json_object"},
+        max_tokens=4000
+    )
+    return json.loads(res.choices[0].message.content)
+
+# ==========================================
+# 🚀 SECTION 6: THE PUBLISH ENGINE
+# ==========================================
+def publish_engine():
     logging.basicConfig(level=logging.INFO)
     try:
         tavily = TavilyClient(api_key=Config.TAVILY_KEY)
         groq = Groq(api_key=Config.GROQ_KEY)
         wp = Client(Config.WP_URL, Config.WP_USER, Config.WP_PASS)
 
-        # 🎯 PILLAR ROTATION & FLUID LENGTH
-        category = random.choice(["Politics", "Economics", "Entertainment", "Sports"])
-        target_words = random.randint(1200, 1600)
-        
-        logging.info(f"🌍 GCHAM Scouting {category} (USA, UK, France) | Target: {target_words} words...")
-        
-        # Scouting for "Direct Issues" in 1st world countries
-        scout_query = f"breaking news {category} March 20 2026 USA UK France investigative details"
-        scout = tavily.search(query=scout_query, search_depth="advanced")
-        trends = "\n".join([f"- {r['title']}" for r in scout['results']])
+        # 1. Scout Trends (With Fail-Safe)
+        trends = get_trending_topics(tavily)
+        topic = random.choice(trends)
+        logging.info(f"🔥 Active Topic: {topic}")
 
-        decision_msg = groq.chat.completions.create(
-            messages=[{"role": "user", "content": f"Pick the #1 most hard-hitting 'Direct Issue' from: {trends}. Return ONLY the topic name."}],
-            model="llama-3.3-70b-versatile"
-        )
-        decision = decision_msg.choices[0].message.content.strip()
-        logging.info(f"🔥 Chosen Pillar Topic: {decision}")
-
-        search = tavily.search(query=f"deep investigative reports, data, and power-player quotes for {decision}", search_depth="advanced")
-        sources = "\n".join([f"Source: {r['url']}" for r in search['results'][:3]])
+        # 2. Research & Write
+        search = tavily.search(query=f"deep investigative details for {topic} March 2026", search_depth="advanced")
         context = "\n".join([r['content'] for r in search['results']])
+        draft = write_global_report(groq, topic, context, random.randint(1200, 1600))
+        draft['body'] = add_internal_links(draft['body'])
 
-        # 🚀 THE ELITE WRITER PROMPT
-        writer_prompt = f"""
-        Return ONLY a JSON object. Topic: {decision}. Context: {context}. 
-        Sources: {sources}.
-        Task: Write a {target_words}-word investigative report for GCHAM Empire.
-        
-        1. 'headline': A high-end, viral journalistic headline.
-        2. 'excerpt': A 2-sentence SEO summary for the support box.
-        3. 'body': The full report in HTML.
-           - NO generic intros. Tackle the 'Direct Issue' immediately.
-           - Use at least 6 H2/H3 subheadings to maintain 1200-1600 word depth.
-           - Focus on impacts in Washington, London, and Paris.
-           - Cite sources naturally using <a href='URL'>Source</a>.
-        4. 'image_kw': SPECIFIC keyword (e.g., 'White House', 'London Stock Exchange', 'World Cup Stadium').
-        5. 'wp_category': '{category}'
-        """
-        
-        response = groq.chat.completions.create(
-            messages=[{"role": "user", "content": writer_prompt}],
-            model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"},
-            max_tokens=4000
-        )
-        
-        draft = json.loads(response.choices[0].message.content)
-        image_id, img_caption = get_and_upload_image(draft['image_kw'], wp)
-        
-        # 🛡️ THE PERSISTENT SUPPORT BOX (Brayan's Requirement)
+        # 🛡️ THE SUPPORT BOX (Brayan's Mission)
         support_header = """
-        <div style="background:#f0f7ff; border:2px solid #0056b3; padding:25px; border-radius:12px; margin-bottom:30px; font-family: sans-serif;">
-            <h3 style="margin-top:0; color:#0056b3;">🛡️ GCHAM Empire: Independent Intelligence</h3>
-            <p>Our global investigative reporting is reader-supported. We cover Politics, Economics, Entertainment, and Sports across the 1st world power centers.</p>
-            <strong>Support Our Mission:</strong> <a href="mailto:gchamempire@gmail.com">gchamempire@gmail.com</a>
+        <div style="background:#f0f7ff; border:2px solid #0056b3; padding:25px; border-radius:12px; margin-bottom:30px; font-family:sans-serif;">
+            <h3 style="margin-top:0; color:#0056b3;">🛡️ GCHAM Empire: Reader-Supported Intelligence</h3>
+            <p>Our global reporting remains free and independent thanks to our readers.</p>
+            <p><strong>✉️ Contact:</strong> <a href="mailto:gchamempire@gmail.com">gchamempire@gmail.com</a></p>
         </div>
         """
         
-        full_content = f"""
-        {support_header}
-        <div style="background:#fffbe6; padding:15px; border:1px solid #ffe58f; margin-bottom:20px;">
-            <strong>Editor's Summary:</strong> {draft['excerpt']}
-        </div>
-        {draft['body']}
-        <p style="font-size:0.8em; color:gray; margin-top:20px;">Featured Image: {img_caption}</p>
-        <hr>
-        <p><em>Reported by {Config.AUTHOR_NAME}, Founder of GCHAM Empire.</em></p>
-        """
+        image_id, img_label = get_and_upload_image(draft['image_kw'], wp)
+        author_box = f"<hr><p><em>Reported by {Config.AUTHOR_NAME}, Founder of GCHAM Empire.</em></p>"
 
+        full_content = f"{support_header}<p><i>{draft['excerpt']}</i></p>{draft['body']}<br><p style='font-size:10px; color:gray;'>{img_label}</p>{author_box}"
+
+        # 3. Direct Post
         post = WordPressPost()
         post.title = draft['headline']
         post.content = full_content
-        post.post_status = 'publish' 
-        post.terms_names = {'category': [draft['wp_category']], 'post_tag': ['GCHAM', 'Global News', 'Investigative']}
+        post.post_status = 'publish'
+        post.terms_names = {'category': [draft['category']], 'post_tag': draft['keywords'].split(',')}
         if image_id: post.thumbnail = image_id
         
-        post_id = wp.call(posts.NewPost(post))
-        logging.info(f"✅ GCHAM SUCCESS: {draft['wp_category']} article {post_id} is live.")
+        wp.call(posts.NewPost(post))
+        logging.info(f"✅ GCHAM SUCCESS: {topic} is LIVE.")
 
     except Exception as e:
-        logging.error(f"❌ Error: {e}")
+        logging.error(f"❌ System Error: {e}")
 
 if __name__ == "__main__":
-    publish()
+    publish_engine()
