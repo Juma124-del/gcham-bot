@@ -27,15 +27,24 @@ class Config:
 # ==========================================
 def get_trending_topics(tavily_client):
     try:
-        # Attempt 1: Google Trends Library
+        # 1. Attempt Google Trends
+        logging.info("📡 Attempting Google Trends...")
         pytrends = TrendReq(hl='en-US', tz=360)
         trending = pytrends.trending_searches(pn='united_states')
         return trending[0].tolist()[:10]
     except Exception as e:
-        logging.warning(f"⚠️ Pytrends blocked: {e}. Switching to Tavily Live Scouting...")
-        # Attempt 2: Live Web Scouting (Fail-Safe)
-        search = tavily_client.search(query="top trending global news headlines today March 2026", search_depth="basic")
-        return [r['title'] for r in search['results'][:10]]
+        # 2. If it fails (Exit Code 1 prevention), use Tavily
+        logging.warning(f"⚠️ Google Trends blocked: {e}. Switching to Tavily Live Scouting...")
+        try:
+            search = tavily_client.search(
+                query="top global news headlines today March 2026", 
+                search_depth="basic"
+            )
+            return [r['title'] for r in search['results'][:10]]
+        except:
+            # 3. Last resort fallback (Never let the bot die)
+            logging.error("🚨 Both Trends and Tavily failed. Using hardcoded emergency topics.")
+            return ["Global Economic Shift", "World Politics 2026", "Crypto Markets Update", "International Sports Highlights"]
 
 # ==========================================
 # 🔗 SECTION 3: INTERNAL LINKING & SEO
@@ -53,7 +62,7 @@ def add_internal_links(content):
     return content
 
 # ==========================================
-# 📸 SECTION 4: IMAGE HANDLER (SEO ALT TEXT)
+# 📸 SECTION 4: IMAGE HANDLER (SEO SAFE)
 # ==========================================
 def get_and_upload_image(keyword, wp_client):
     if not Config.PEXELS_KEY: return None, None
