@@ -26,11 +26,11 @@ jobs:
           sleep $(( DELAY * 60 ))
 
       # --- 📦 DEPENDENCY INSTALLATION ---
-      # Added 'ccxt' to the list below to fix the ModuleNotFoundError
+      # Corrected to include pytrends and all necessary GCHAM libraries
       - name: Install Tools (FORCED)
         run: |
           python -m pip install --upgrade pip
-          pip install groq tavily-python python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity oauth2client httplib2 ccxt
+          pip install groq tavily-python python-wordpress-xmlrpc google-api-python-client google-auth requests python-slugify feedparser Pillow tenacity oauth2client httplib2 ccxt pytrends
 
       # --- 🚀 RUN GCHAM ENGINE ---
       - name: Run GCHAM Bot
