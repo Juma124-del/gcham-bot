@@ -146,13 +146,28 @@ def publish_engine():
         draft['body'] = add_internal_links(draft['body'])
 
         # 🛡️ THE SUPPORT BOX (Brayan's Mission)
-        support_header = """
-        <div style="background:#f0f7ff; border:2px solid #0056b3; padding:25px; border-radius:12px; margin-bottom:30px; font-family:sans-serif;">
-            <h3 style="margin-top:0; color:#0056b3;">🛡️ GCHAM Empire: Reader-Supported Intelligence</h3>
-            <p>Our global reporting remains free and independent thanks to our readers.</p>
-            <p><strong>✉️ Contact:</strong> <a href="mailto:gchamempire@gmail.com">gchamempire@gmail.com</a></p>
-        </div>
-        """
+support_header = """
+<div style="background:#f9fbfc; border:1px solid #e1e8ed; padding:30px; border-radius:15px; margin-bottom:35px; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+    <h3 style="margin-top:0; color:#0056b3; font-size:22px; border-bottom:2px solid #0056b3; padding-bottom:10px;">🛡️ Support the GCHAM Empire</h3>
+    <p style="color:#444; line-height:1.6; font-size:15px;">
+        Our mission is to provide independent, high-standard global reporting across <strong>Politics, Economics, and Sports</strong>. 
+        Your support ensures the <strong>GCHAM Empire</strong> remains free and accessible to the whole world.
+    </p>
+    
+    <div style="background:#ffffff; border-left:5px solid #26a17b; padding:15px; margin:20px 0; border-radius:5px;">
+        <p style="margin:0; font-weight:bold; color:#26a17b; font-size:14px; text-transform:uppercase;">Donate via USDT (TRC-20 Network):</p>
+        <code style="display:block; background:#f4f4f4; padding:12px; margin-top:8px; border-radius:4px; font-size:14px; word-break:break-all; color:#333; border:1px dashed #26a17b;">
+            TRxc5kDS89SAXCR8GgGzHXRH4oSjuhBM9T
+        </code>
+        <p style="margin-top:8px; font-size:12px; color:#666;">⚠️ <em>Please ensure you are using the <strong>TRON (TRC20)</strong> network to avoid loss of funds.</em></p>
+    </div>
+
+    <p style="margin-bottom:0; font-size:14px;">
+        <strong>✉️ Inquiries & Partnerships:</strong> 
+        <a href="mailto:gchamempire@gmail.com" style="color:#0056b3; text-decoration:none; font-weight:bold;">gchamempire@gmail.com</a>
+    </p>
+</div>
+"""
         
         image_id, img_label = get_and_upload_image(draft['image_kw'], wp)
         author_box = f"<hr><p><em>Reported by {Config.AUTHOR_NAME}, Founder of GCHAM Empire.</em></p>"
